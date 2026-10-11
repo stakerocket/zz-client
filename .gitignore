@@ -1,0 +1,30 @@
+# Godot 4
+.godot/
+.import/
+*.translation
+export.cfg
+export_presets.cfg
+*.tmp
+
+# Exports / builds
+export/
+build/
+*.pck
+*.apk
+*.aab
+*.zip
+*.dmg
+*.app
+*.x86_64
+*.x86_32
+
+# If ever switch to C# / .NET Godot
+.mono/
+data_*/
+*.csproj.user
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

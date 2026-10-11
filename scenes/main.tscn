@@ -1,0 +1,659 @@
+[gd_scene load_steps=16 format=3 uid="uid://zonezero_main"]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/battle/grid_view.gd" id="2_grid"]
+[ext_resource type="Script" path="res://scripts/net/ws_client.gd" id="3_ws"]
+[ext_resource type="Script" path="res://scripts/battle/battle_controller.gd" id="4_battle"]
+[ext_resource type="Script" path="res://scripts/ui/app_ui.gd" id="5_ui"]
+[ext_resource type="Texture2D" path="res://assets/login_wasteland.jpg" id="6_bg"]
+[ext_resource type="Texture2D" path="res://assets/lobby_bunker.jpg" id="7_lobby_bg"]
+
+[sub_resource type="StyleBoxFlat" id="StyleLoginBtnNormal"]
+bg_color = Color(0.62, 0.45, 0.26, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.78, 0.58, 0.34, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+content_margin_left = 14
+content_margin_top = 10
+content_margin_right = 14
+content_margin_bottom = 10
+
+[sub_resource type="StyleBoxFlat" id="StyleLoginBtnHover"]
+bg_color = Color(0.72, 0.53, 0.3, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.88, 0.68, 0.4, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+content_margin_left = 14
+content_margin_top = 10
+content_margin_right = 14
+content_margin_bottom = 10
+
+[sub_resource type="StyleBoxFlat" id="StyleLoginBtnPressed"]
+bg_color = Color(0.45, 0.32, 0.18, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.6, 0.44, 0.26, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+content_margin_left = 14
+content_margin_top = 10
+content_margin_right = 14
+content_margin_bottom = 10
+
+[sub_resource type="StyleBoxFlat" id="StyleChatSend"]
+bg_color = Color(0.18, 0.18, 0.18, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.85, 0.85, 0.85, 1)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+content_margin_left = 16
+content_margin_top = 8
+content_margin_right = 16
+content_margin_bottom = 8
+
+[sub_resource type="StyleBoxFlat" id="StylePlayersTitle"]
+bg_color = Color(0, 0, 0, 0)
+border_width_bottom = 1
+border_color = Color(0.35, 0.35, 0.35, 0.55)
+content_margin_left = 0
+content_margin_top = 6
+content_margin_right = 0
+content_margin_bottom = 8
+
+[sub_resource type="StyleBoxFlat" id="StylePlayerListEmpty"]
+bg_color = Color(0, 0, 0, 0)
+
+[sub_resource type="StyleBoxFlat" id="StyleResultPanel"]
+bg_color = Color(0.12, 0.11, 0.1, 0.94)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.62, 0.45, 0.26, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+content_margin_left = 28
+content_margin_top = 22
+content_margin_right = 28
+content_margin_bottom = 22
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1_main")
+
+[node name="Camera2D" type="Camera2D" parent="."]
+zoom = Vector2(0.85, 0.85)
+
+[node name="World" type="Node2D" parent="."]
+visible = false
+
+[node name="Grid" type="Node2D" parent="World"]
+script = ExtResource("2_grid")
+
+[node name="Units" type="Node2D" parent="World"]
+z_index = 1
+
+[node name="WSClient" type="Node" parent="."]
+script = ExtResource("3_ws")
+
+[node name="BattleController" type="Node" parent="."]
+script = ExtResource("4_battle")
+
+[node name="UI" type="CanvasLayer" parent="."]
+script = ExtResource("5_ui")
+
+[node name="ChatDock" type="PanelContainer" parent="UI"]
+visible = false
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = -240.0
+offset_right = -268.0
+offset_bottom = -16.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 0
+
+[node name="Margin" type="MarginContainer" parent="UI/ChatDock"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="VBox" type="VBoxContainer" parent="UI/ChatDock/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Tabs" type="TabContainer" parent="UI/ChatDock/Margin/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_font_sizes/font_size = 13
+
+[node name="Лобби" type="RichTextLabel" parent="UI/ChatDock/Margin/VBox/Tabs"]
+layout_mode = 2
+bbcode_enabled = true
+scroll_following = true
+custom_minimum_size = Vector2(0, 120)
+
+[node name="Бой" type="RichTextLabel" parent="UI/ChatDock/Margin/VBox/Tabs"]
+visible = false
+layout_mode = 2
+bbcode_enabled = true
+scroll_following = true
+custom_minimum_size = Vector2(0, 120)
+
+[node name="InputRow" type="HBoxContainer" parent="UI/ChatDock/Margin/VBox"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ChatEdit" type="LineEdit" parent="UI/ChatDock/Margin/VBox/InputRow"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Сообщение..."
+
+[node name="SendBtn" type="Button" parent="UI/ChatDock/Margin/VBox/InputRow"]
+custom_minimum_size = Vector2(120, 40)
+layout_mode = 2
+theme_override_styles/normal = SubResource("StyleChatSend")
+theme_override_styles/hover = SubResource("StyleChatSend")
+theme_override_styles/pressed = SubResource("StyleChatSend")
+theme_override_styles/focus = SubResource("StyleChatSend")
+text = "Отправить"
+
+[node name="LoginScreen" type="Control" parent="UI"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Background" type="TextureRect" parent="UI/LoginScreen"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("6_bg")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="Dim" type="ColorRect" parent="UI/LoginScreen"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.05, 0.04, 0.03, 0.45)
+
+[node name="Center" type="CenterContainer" parent="UI/LoginScreen"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Panel" type="PanelContainer" parent="UI/LoginScreen/Center"]
+custom_minimum_size = Vector2(400, 240)
+layout_mode = 2
+
+[node name="Margin" type="MarginContainer" parent="UI/LoginScreen/Center/Panel"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 24
+
+[node name="InnerCenter" type="CenterContainer" parent="UI/LoginScreen/Center/Panel/Margin"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="VBox" type="VBoxContainer" parent="UI/LoginScreen/Center/Panel/Margin/InnerCenter"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Hint" type="Label" parent="UI/LoginScreen/Center/Panel/Margin/InnerCenter/VBox"]
+layout_mode = 2
+text = "Введите ник, чтобы войти в лобби"
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="NickEdit" type="LineEdit" parent="UI/LoginScreen/Center/Panel/Margin/InnerCenter/VBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(300, 0)
+placeholder_text = "Ник"
+alignment = 1
+
+[node name="ContinueBtn" type="Button" parent="UI/LoginScreen/Center/Panel/Margin/InnerCenter/VBox"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.98, 0.93, 0.82, 1)
+theme_override_colors/font_hover_color = Color(1, 0.97, 0.9, 1)
+theme_override_colors/font_pressed_color = Color(0.9, 0.84, 0.72, 1)
+theme_override_font_sizes/font_size = 16
+theme_override_styles/normal = SubResource("StyleLoginBtnNormal")
+theme_override_styles/hover = SubResource("StyleLoginBtnHover")
+theme_override_styles/pressed = SubResource("StyleLoginBtnPressed")
+theme_override_styles/focus = SubResource("StyleLoginBtnHover")
+text = "Войти в лобби"
+
+[node name="ErrorLabel" type="Label" parent="UI/LoginScreen/Center/Panel/Margin/InnerCenter/VBox"]
+layout_mode = 2
+horizontal_alignment = 1
+modulate = Color(1, 0.45, 0.4, 1)
+
+[node name="LobbyScreen" type="Control" parent="UI"]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Background" type="TextureRect" parent="UI/LobbyScreen"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("7_lobby_bg")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="Dim" type="ColorRect" parent="UI/LobbyScreen"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.04, 0.05, 0.04, 0.4)
+
+[node name="PlayerCard" type="PanelContainer" parent="UI/LobbyScreen"]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -240.0
+offset_top = 16.0
+offset_right = -16.0
+offset_bottom = 168.0
+grow_horizontal = 0
+
+[node name="VBox" type="VBoxContainer" parent="UI/LobbyScreen/PlayerCard"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="CardTitle" type="Label" parent="UI/LobbyScreen/PlayerCard/VBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.85, 0.85, 0.85, 1)
+theme_override_styles/normal = SubResource("StylePlayersTitle")
+text = "Персонаж"
+horizontal_alignment = 1
+
+[node name="InfoMargin" type="MarginContainer" parent="UI/LobbyScreen/PlayerCard/VBox"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="InfoVBox" type="VBoxContainer" parent="UI/LobbyScreen/PlayerCard/VBox/InfoMargin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="NickLabel" type="Label" parent="UI/LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox"]
+layout_mode = 2
+text = "Nick"
+horizontal_alignment = 1
+
+[node name="HPLabel" type="Label" parent="UI/LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox"]
+layout_mode = 2
+text = "ХП: 100"
+horizontal_alignment = 1
+
+[node name="APLabel" type="Label" parent="UI/LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox"]
+layout_mode = 2
+text = "ОД: 16"
+horizontal_alignment = 1
+
+[node name="FindCenter" type="CenterContainer" parent="UI/LobbyScreen"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_bottom = -240.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="FindBtn" type="Button" parent="UI/LobbyScreen/FindCenter"]
+custom_minimum_size = Vector2(220, 52)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.98, 0.93, 0.82, 1)
+theme_override_colors/font_hover_color = Color(1, 0.97, 0.9, 1)
+theme_override_colors/font_pressed_color = Color(0.9, 0.84, 0.72, 1)
+theme_override_colors/font_disabled_color = Color(0.75, 0.68, 0.55, 0.7)
+theme_override_font_sizes/font_size = 18
+theme_override_styles/normal = SubResource("StyleLoginBtnNormal")
+theme_override_styles/hover = SubResource("StyleLoginBtnHover")
+theme_override_styles/pressed = SubResource("StyleLoginBtnPressed")
+theme_override_styles/disabled = SubResource("StyleLoginBtnPressed")
+theme_override_styles/focus = SubResource("StyleLoginBtnHover")
+text = "Найти бой"
+
+[node name="BottomBar" type="HBoxContainer" parent="UI"]
+visible = false
+z_index = 100
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -252.0
+offset_top = -240.0
+offset_right = -16.0
+offset_bottom = -16.0
+grow_horizontal = 0
+grow_vertical = 0
+theme_override_constants/separation = 12
+
+[node name="PlayersPanel" type="PanelContainer" parent="UI/BottomBar"]
+custom_minimum_size = Vector2(220, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 1.0
+
+[node name="VBox" type="VBoxContainer" parent="UI/BottomBar/PlayersPanel"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="ListTitle" type="Label" parent="UI/BottomBar/PlayersPanel/VBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.85, 0.85, 0.85, 1)
+theme_override_styles/normal = SubResource("StylePlayersTitle")
+text = "Игроки"
+horizontal_alignment = 1
+
+[node name="PlayerList" type="ItemList" parent="UI/BottomBar/PlayersPanel/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+focus_mode = 0
+allow_rmb_select = false
+allow_reselect = false
+theme_override_colors/guide_color = Color(0, 0, 0, 0)
+theme_override_constants/v_separation = 4
+theme_override_styles/selected = SubResource("StylePlayerListEmpty")
+theme_override_styles/selected_focus = SubResource("StylePlayerListEmpty")
+theme_override_styles/cursor = SubResource("StylePlayerListEmpty")
+theme_override_styles/cursor_unfocused = SubResource("StylePlayerListEmpty")
+
+[node name="BattleHud" type="Control" parent="UI"]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="BattlePanel" type="PanelContainer" parent="UI/BattleHud"]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 280.0
+offset_bottom = 520.0
+
+[node name="VBox" type="VBoxContainer" parent="UI/BattleHud/BattlePanel"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Title" type="Label" parent="UI/BattleHud/BattlePanel/VBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.85, 0.85, 0.85, 1)
+theme_override_styles/normal = SubResource("StylePlayersTitle")
+text = "Бой"
+horizontal_alignment = 1
+
+[node name="InfoMargin" type="MarginContainer" parent="UI/BattleHud/BattlePanel/VBox"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="InfoVBox" type="VBoxContainer" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="TurnLabel" type="Label" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox"]
+layout_mode = 2
+text = "Ход 1"
+horizontal_alignment = 1
+
+[node name="TimerLabel" type="Label" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+text = "0:30"
+horizontal_alignment = 1
+
+[node name="EndBtn" type="Button" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.98, 0.93, 0.82, 1)
+theme_override_colors/font_hover_color = Color(1, 0.97, 0.9, 1)
+theme_override_colors/font_pressed_color = Color(0.9, 0.84, 0.72, 1)
+theme_override_colors/font_disabled_color = Color(0.75, 0.68, 0.55, 0.7)
+theme_override_font_sizes/font_size = 16
+theme_override_styles/normal = SubResource("StyleLoginBtnNormal")
+theme_override_styles/hover = SubResource("StyleLoginBtnHover")
+theme_override_styles/pressed = SubResource("StyleLoginBtnPressed")
+theme_override_styles/disabled = SubResource("StyleLoginBtnPressed")
+theme_override_styles/focus = SubResource("StyleLoginBtnHover")
+text = "Конец хода"
+
+[node name="PostureRow" type="HBoxContainer" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="StandBtn" type="Button" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox/PostureRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 12
+text = "Стоя"
+
+[node name="SitBtn" type="Button" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox/PostureRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 12
+text = "Сидя"
+
+[node name="CoverBtn" type="Button" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox/PostureRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 12
+text = "Укрылся"
+
+[node name="UndoBtn" type="Button" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox"]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Отменить"
+
+[node name="HistoryLabel" type="Label" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "План"
+horizontal_alignment = 1
+
+[node name="HistoryList" type="ItemList" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox"]
+custom_minimum_size = Vector2(0, 120)
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_font_sizes/font_size = 12
+allow_reselect = false
+auto_height = false
+
+[node name="PlayerCard" type="PanelContainer" parent="UI/BattleHud"]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -240.0
+offset_top = 16.0
+offset_right = -16.0
+offset_bottom = 196.0
+grow_horizontal = 0
+
+[node name="VBox" type="VBoxContainer" parent="UI/BattleHud/PlayerCard"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="CardTitle" type="Label" parent="UI/BattleHud/PlayerCard/VBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.85, 0.85, 0.85, 1)
+theme_override_styles/normal = SubResource("StylePlayersTitle")
+text = "Персонаж"
+horizontal_alignment = 1
+
+[node name="InfoMargin" type="MarginContainer" parent="UI/BattleHud/PlayerCard/VBox"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="InfoVBox" type="VBoxContainer" parent="UI/BattleHud/PlayerCard/VBox/InfoMargin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="NickLabel" type="Label" parent="UI/BattleHud/PlayerCard/VBox/InfoMargin/InfoVBox"]
+layout_mode = 2
+text = "Nick"
+horizontal_alignment = 1
+
+[node name="HPLabel" type="Label" parent="UI/BattleHud/PlayerCard/VBox/InfoMargin/InfoVBox"]
+layout_mode = 2
+text = "ХП: 100"
+horizontal_alignment = 1
+
+[node name="APLabel" type="Label" parent="UI/BattleHud/PlayerCard/VBox/InfoMargin/InfoVBox"]
+layout_mode = 2
+text = "ОД: 16"
+horizontal_alignment = 1
+
+[node name="PostureLabel" type="Label" parent="UI/BattleHud/PlayerCard/VBox/InfoMargin/InfoVBox"]
+layout_mode = 2
+text = "Стойка: стоя"
+horizontal_alignment = 1
+
+[node name="ResultOverlay" type="Control" parent="UI/BattleHud"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+
+[node name="Dim" type="ColorRect" parent="UI/BattleHud/ResultOverlay"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+color = Color(0.04, 0.03, 0.02, 0.62)
+
+[node name="Center" type="CenterContainer" parent="UI/BattleHud/ResultOverlay"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Panel" type="PanelContainer" parent="UI/BattleHud/ResultOverlay/Center"]
+custom_minimum_size = Vector2(320, 0)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleResultPanel")
+
+[node name="VBox" type="VBoxContainer" parent="UI/BattleHud/ResultOverlay/Center/Panel"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="Title" type="Label" parent="UI/BattleHud/ResultOverlay/Center/Panel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.98, 0.93, 0.82, 1)
+theme_override_font_sizes/font_size = 26
+text = "Бой окончен"
+horizontal_alignment = 1
+
+[node name="ResultLabel" type="Label" parent="UI/BattleHud/ResultOverlay/Center/Panel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.8, 0.7, 1)
+theme_override_font_sizes/font_size = 16
+text = ""
+horizontal_alignment = 1
+
+[node name="LobbyBtn" type="Button" parent="UI/BattleHud/ResultOverlay/Center/Panel/VBox"]
+custom_minimum_size = Vector2(0, 46)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.98, 0.93, 0.82, 1)
+theme_override_colors/font_hover_color = Color(1, 0.97, 0.9, 1)
+theme_override_colors/font_pressed_color = Color(0.9, 0.84, 0.72, 1)
+theme_override_font_sizes/font_size = 16
+theme_override_styles/normal = SubResource("StyleLoginBtnNormal")
+theme_override_styles/hover = SubResource("StyleLoginBtnHover")
+theme_override_styles/pressed = SubResource("StyleLoginBtnPressed")
+theme_override_styles/focus = SubResource("StyleLoginBtnHover")
+text = "Вернуться в лобби"
