@@ -39,13 +39,23 @@ func _ready() -> void:
 		var can_plan := not locked and battle.in_battle
 		ui.set_end_enabled(can_plan)
 		ui.set_undo_enabled(can_plan and not battle.action_queue.is_empty())
+		_refresh_medkit_btn()
 	)
 	battle.history_changed.connect(func(lines: Array):
 		ui.set_history(lines)
 		ui.set_undo_enabled(not battle.input_locked and battle.in_battle and not lines.is_empty())
+		_refresh_medkit_btn()
 	)
 	battle.ap_changed.connect(func(_v):
 		ui.set_posture(battle.local_posture)
+		_refresh_medkit_btn()
+	)
+	battle.hp_changed.connect(func(_v):
+		_refresh_medkit_btn()
+	)
+	battle.medkits_changed.connect(func(count: int):
+		ui.set_medkit_count(count, battle.medkit_heal, battle.medkit_cost)
+		_refresh_medkit_btn()
 	)
 
 	ui.continue_pressed.connect(_on_continue)
@@ -53,6 +63,7 @@ func _ready() -> void:
 	ui.end_turn_pressed.connect(battle.request_end_turn)
 	ui.undo_pressed.connect(battle.request_undo)
 	ui.posture_pressed.connect(battle.request_posture)
+	ui.medkit_pressed.connect(battle.request_medkit)
 	ui.chat_submitted.connect(func(text: String, channel: String):
 		battle.send_chat(text, channel)
 	)
@@ -177,8 +188,19 @@ func _clamp_camera() -> void:
 	camera.position = camera.position.clamp(min_p, max_p)
 
 
+func _refresh_medkit_btn() -> void:
+	var can_plan := not battle.input_locked and battle.in_battle
+	ui.set_medkit_enabled(
+		can_plan
+		and battle.local_ap >= battle.medkit_cost
+		and battle.local_hp < battle.max_hp
+		and battle.local_medkits > 0
+	)
+
+
 func _on_battle_ended(winner_id: String) -> void:
 	ui.set_end_enabled(false)
+	ui.set_medkit_enabled(false)
 	ui.show_battle_result(winner_id != "" and winner_id == battle.your_id)
 
 

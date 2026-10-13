@@ -6,6 +6,7 @@ signal find_match_pressed
 signal end_turn_pressed
 signal undo_pressed
 signal posture_pressed(posture: String)
+signal medkit_pressed
 signal chat_submitted(text: String, channel: String)
 signal return_to_lobby_pressed
 
@@ -45,6 +46,7 @@ var _in_battle_ui: bool = false
 @onready var stand_btn: Button = $BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox/PostureRow/StandBtn
 @onready var sit_btn: Button = $BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox/PostureRow/SitBtn
 @onready var cover_btn: Button = $BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox/PostureRow/CoverBtn
+@onready var medkit_btn: Button = $BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox/MedkitBtn
 @onready var undo_btn: Button = $BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox/UndoBtn
 @onready var history_list: ItemList = $BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox/HistoryList
 @onready var battle_nick: Label = $BattleHud/PlayerCard/VBox/InfoMargin/InfoVBox/NickLabel
@@ -66,6 +68,7 @@ func _ready() -> void:
 	stand_btn.pressed.connect(func(): posture_pressed.emit("stand"))
 	sit_btn.pressed.connect(func(): posture_pressed.emit("sit"))
 	cover_btn.pressed.connect(func(): posture_pressed.emit("cover"))
+	medkit_btn.pressed.connect(func(): medkit_pressed.emit())
 	lobby_btn.pressed.connect(func(): return_to_lobby_pressed.emit())
 	chat_send_btn.pressed.connect(_on_chat_send)
 	chat_edit.text_submitted.connect(func(_t): _on_chat_send())
@@ -203,6 +206,14 @@ func set_end_enabled(enabled: bool) -> void:
 	stand_btn.disabled = not enabled
 	sit_btn.disabled = not enabled
 	cover_btn.disabled = not enabled
+
+
+func set_medkit_enabled(enabled: bool) -> void:
+	medkit_btn.disabled = not enabled
+
+
+func set_medkit_count(count: int, heal: int = 15, ap_cost: int = 5) -> void:
+	medkit_btn.text = "Аптечка ×%d (+%d ХП / %d ОД)" % [maxi(0, count), heal, ap_cost]
 
 
 func set_undo_enabled(enabled: bool) -> void:

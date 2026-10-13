@@ -519,6 +519,12 @@ size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 12
 text = "Укрылся"
 
+[node name="MedkitBtn" type="Button" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox"]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Аптечка ×5 (+15 ХП / 5 ОД)"
+
 [node name="UndoBtn" type="Button" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox"]
 custom_minimum_size = Vector2(0, 36)
 layout_mode = 2

@@ -6,14 +6,20 @@ var move_cost_stand: int = 1
 var move_cost_sit: int = 2
 var shoot_cost: int = 4
 var posture_cost: int = 1
+var medkit_cost: int = 5
+var medkit_heal: int = 15
+var medkit_max: int = 5
 ## Max AP pool per turn (from server rules.initial_ap).
 var max_ap: int = 16
+## Max HP (from unit / InitialHP).
+var max_hp: int = 100
 const PROJECTILE_TIME := 0.35
 const ProjectileBoltScript := preload("res://scripts/battle/projectile_bolt.gd")
 const WallBurstScript := preload("res://scripts/battle/wall_burst.gd")
 
 signal ap_changed(value: int)
 signal hp_changed(value: int)
+signal medkits_changed(value: int)
 signal turn_changed(turn: int)
 signal timer_changed(seconds_left: float)
 signal input_lock_changed(locked: bool)
@@ -32,6 +38,7 @@ var your_id: String = ""
 var input_locked: bool = true
 var local_ap: int = 0
 var local_hp: int = 0
+var local_medkits: int = 5
 var local_pos: Vector2i = Vector2i.ZERO
 var local_posture: String = "stand"
 var action_queue: Array = []
@@ -46,6 +53,7 @@ var _resolve_queue: Array = [] # pending battle_state / battle_end payloads
 var _turn_start_pos: Vector2i = Vector2i.ZERO
 var _turn_start_ap: int = 0
 var _turn_start_posture: String = "stand"
+var _turn_start_medkits: int = 5
 ## Last hover path steps (excluding start), for click-to-queue.
 var _hover_path: Array = []
 var _hover_path_ap: int = 0
@@ -132,6 +140,23 @@ func request_posture(posture: String) -> void:
 	local_posture = posture
 	ap_changed.emit(local_ap)
 	_apply_local_posture_visual()
+	_emit_history()
+
+
+func request_medkit() -> void:
+	if input_locked or not in_battle or _playing_events:
+		return
+	if local_ap < medkit_cost:
+		return
+	if local_hp >= max_hp:
+		return
+	if local_medkits <= 0:
+		return
+	action_queue.append(ZZProtocol.medkit_action())
+	local_ap -= medkit_cost
+	local_medkits -= 1
+	ap_changed.emit(local_ap)
+	medkits_changed.emit(local_medkits)
 	_emit_history()
 
 
@@ -261,6 +286,9 @@ func _apply_combat_rules(rules: Variant) -> void:
 	move_cost_sit = ZZLos.rule_i("move_ap_sit", move_cost_sit)
 	shoot_cost = ZZLos.rule_i("shoot_ap", shoot_cost)
 	posture_cost = ZZLos.rule_i("posture_ap", posture_cost)
+	medkit_cost = ZZLos.rule_i("medkit_ap", medkit_cost)
+	medkit_heal = ZZLos.rule_i("medkit_heal", medkit_heal)
+	medkit_max = ZZLos.rule_i("medkit_max", medkit_max)
 	max_ap = maxi(1, ZZLos.rule_i("initial_ap", max_ap))
 
 
@@ -330,10 +358,32 @@ func _play_one_event(e: Dictionary) -> void:
 			await _play_move_event(e)
 		"posture":
 			await _play_posture_event(e)
+		"medkit":
+			await _play_medkit_event(e)
 		"shoot":
 			await _play_shoot_event(e)
 		_:
 			pass
+
+
+func _play_medkit_event(e: Dictionary) -> void:
+	var actor_id := str(e.get("actor_id", ""))
+	var heal := int(e.get("heal", 0))
+	var hp_after := int(e.get("hp_after", 0))
+	var medkits_after := int(e.get("medkits_after", 0))
+	var uv: ZZUnitView = unit_nodes.get(actor_id)
+	if uv != null and is_instance_valid(uv):
+		await uv.apply_heal(heal, hp_after)
+	if players.has(actor_id):
+		players[actor_id]["hp"] = hp_after
+		players[actor_id]["medkits"] = medkits_after
+	if actor_id == your_id:
+		local_hp = hp_after
+		local_medkits = medkits_after
+		_turn_start_medkits = medkits_after
+		hp_changed.emit(local_hp)
+		medkits_changed.emit(local_medkits)
+	await get_tree().create_timer(0.35).timeout
 
 
 func _play_posture_event(e: Dictionary) -> void:
@@ -499,14 +549,18 @@ func _apply_state(state: Variant, reset_queue: bool, snap_positions: bool) -> vo
 		if pid == your_id:
 			local_ap = int(pd.get("ap", 0))
 			local_hp = hp_val
+			local_medkits = int(pd.get("medkits", medkit_max))
+			max_hp = maxi(uv.max_hp, local_hp)
 			local_pos = Vector2i(gx, gy)
 			local_posture = posture
 			_turn_start_pos = local_pos
 			_turn_start_ap = local_ap
 			_turn_start_posture = local_posture
+			_turn_start_medkits = local_medkits
 			_apply_local_weapon(pd)
 			ap_changed.emit(local_ap)
 			hp_changed.emit(local_hp)
+			medkits_changed.emit(local_medkits)
 		idx += 1
 
 
@@ -817,6 +871,7 @@ func _recompute_local_from_queue() -> void:
 	local_pos = _turn_start_pos
 	local_ap = _turn_start_ap
 	local_posture = _turn_start_posture
+	local_medkits = _turn_start_medkits
 	if unit_nodes.has(your_id):
 		var uv: ZZUnitView = unit_nodes[your_id]
 		if uv != null and is_instance_valid(uv) and not uv.is_dead:
@@ -836,6 +891,9 @@ func _recompute_local_from_queue() -> void:
 			"posture":
 				local_posture = str(act.get("posture", "stand"))
 				local_ap -= posture_cost
+			"medkit":
+				local_ap -= medkit_cost
+				local_medkits = maxi(0, local_medkits - 1)
 	if unit_nodes.has(your_id):
 		var uv2: ZZUnitView = unit_nodes[your_id]
 		if uv2 != null and is_instance_valid(uv2) and not uv2.is_dead:
@@ -845,6 +903,7 @@ func _recompute_local_from_queue() -> void:
 		grid.set_highlight(local_pos if local_pos != _turn_start_pos else Vector2i(-1, -1))
 	_clear_hover_path()
 	ap_changed.emit(local_ap)
+	medkits_changed.emit(local_medkits)
 	_emit_history()
 	# Re-preview last shoot if present.
 	if not action_queue.is_empty():
@@ -919,5 +978,10 @@ func _emit_history() -> void:
 				elif sim_posture == "cover":
 					label = "укрылся"
 				lines.append("Стойка: %s" % label)
+			"medkit":
+				_flush_move_history(lines, move_run, move_end, move_ap)
+				move_run = 0
+				move_ap = 0
+				lines.append("Аптечка (+%d ХП) · %d ОД" % [medkit_heal, medkit_cost])
 	_flush_move_history(lines, move_run, move_end, move_ap)
 	history_changed.emit(lines)

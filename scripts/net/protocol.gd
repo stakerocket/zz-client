@@ -32,3 +32,7 @@ static func shoot_action(target_id: String) -> Dictionary:
 
 static func posture_action(posture: String) -> Dictionary:
 	return {"type": "posture", "posture": posture}
+
+
+static func medkit_action() -> Dictionary:
+	return {"type": "medkit"}

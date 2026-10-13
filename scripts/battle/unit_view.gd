@@ -76,6 +76,26 @@ func apply_hit(damage: int, hp_after: int) -> void:
 		await get_tree().create_timer(0.55).timeout
 
 
+func apply_heal(heal: int, hp_after: int) -> void:
+	if heal > 0:
+		show_heal_number(heal)
+	await flash_heal()
+	set_hp(hp_after, false)
+
+
+func show_heal_number(heal: int) -> void:
+	_float_label("+%d" % heal, Color(0.3, 0.95, 0.4, 1.0))
+
+
+func flash_heal() -> void:
+	var tw := create_tween()
+	tw.tween_property(self, "modulate", Color(0.55, 1.15, 0.65, 1.0), 0.08)
+	tw.tween_property(self, "scale", Vector2(1.12, 1.12), 0.08)
+	tw.tween_property(self, "scale", Vector2.ONE, 0.12)
+	tw.tween_property(self, "modulate", Color(1, 1, 1, 1), 0.12)
+	await tw.finished
+
+
 func snap_to(world_pos: Vector2) -> void:
 	if _move_tween != null and is_instance_valid(_move_tween):
 		_move_tween.kill()
@@ -114,17 +134,22 @@ func _float_label(text: String, col: Color) -> void:
 	var lbl := Label.new()
 	lbl.text = text
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.position = Vector2(-28, -58)
-	lbl.size = Vector2(56, 24)
-	lbl.z_index = 20
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lbl.z_index = 40
 	lbl.add_theme_font_size_override("font_size", 18)
 	lbl.add_theme_color_override("font_color", col)
 	lbl.add_theme_color_override("font_outline_color", Color(0.1, 0.05, 0.02, 1.0))
 	lbl.add_theme_constant_override("outline_size", 4)
+	# World-space popup: ignore unit flash scale/modulate (same for damage and heal).
+	lbl.top_level = true
 	add_child(lbl)
+	lbl.global_position = global_position + Vector2(-32, -58)
+	lbl.size = Vector2(64, 24)
+	var start_y := lbl.global_position.y
 	var tw := create_tween()
 	tw.set_parallel(true)
-	tw.tween_property(lbl, "position:y", lbl.position.y - 36.0, 0.7).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(lbl, "global_position:y", start_y - 36.0, 0.7).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.tween_property(lbl, "modulate:a", 0.0, 0.7).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
 	tw.chain().tween_callback(lbl.queue_free)
 
