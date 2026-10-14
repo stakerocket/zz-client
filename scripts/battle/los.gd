@@ -5,14 +5,20 @@ class_name ZZLos
 ## Hit / AP / weapon numbers come from server `rules` (battle_start / state.rules).
 
 # Fallback defaults — overwritten by apply_rules() from server.
+# chance = accuracy + skill*mod - dist_penalty + pose_bonus - defense (clamp 0..hit_chance_cap)
 static var _rules: Dictionary = {
-	"hit_base_open": 1.0,
-	"hit_base_cover_open": 0.9,
-	"hit_base_stand_half": 0.8,
-	"hit_base_stand_window": 0.7,
-	"hit_base_sit_soft": 0.5,
-	"hit_mul_shooter_stand": 0.8,
-	"hit_mul_shooter_sit": 0.9,
+	"shooter_skill": 1.0,
+	"shooter_skill_mod": 0.5,
+	"hit_chance_cap": 0.95,
+	"hit_pose_bonus_stand": 0.0,
+	"hit_pose_bonus_sit": 0.15,
+	"def_stand_open": 0.0,
+	"def_stand_half": 0.20,
+	"def_stand_window": 0.20,
+	"def_sit_open": 0.15,
+	"def_sit_half": 0.40,
+	"def_sit_window": 0.40,
+	"def_cover_open": 0.60,
 	"initial_ap": 16,
 	"move_ap_stand": 1,
 	"move_ap_sit": 2,
@@ -23,9 +29,10 @@ static var _rules: Dictionary = {
 	"medkit_max": 5,
 	"shoot_ap": 4,
 	"weapon_range": 16,
+	"weapon_accuracy": 0.40,
 	"damage_min": 16,
 	"damage_max": 24,
-	"range_over_hit_per_hex": 0.1,
+	"range_over_hit_per_hex": 0.05,
 	"range_over_damage_per_hex": 0.1,
 }
 
@@ -59,6 +66,8 @@ static func apply_weapon(w: Variant) -> void:
 		_rules["damage_min"] = int(wd.get("damage_min", 16))
 	if wd.has("damage_max"):
 		_rules["damage_max"] = int(wd.get("damage_max", 24))
+	if wd.has("accuracy"):
+		_rules["weapon_accuracy"] = float(wd.get("accuracy", 0.40))
 
 
 static func rules() -> Dictionary:
@@ -77,15 +86,13 @@ static func weapon_range() -> int:
 	return rule_i("weapon_range", 16)
 
 
-static func range_hit_mul(distance: int) -> float:
+static func range_hit_penalty(distance: int) -> float:
 	var wr := weapon_range()
 	if distance < 1 or wr < 1:
-		return 0.0
-	if distance <= wr:
 		return 1.0
-	var over := float(distance - wr)
-	var mul := 1.0 - rule_f("range_over_hit_per_hex", 0.1) * over
-	return maxf(0.0, mul)
+	if distance <= wr:
+		return 0.0
+	return rule_f("range_over_hit_per_hex", 0.05) * float(distance - wr)
 
 
 static func wall_key(x: int, y: int) -> String:
@@ -185,7 +192,7 @@ static func first_wall_on_shot(walls: Dictionary, x0: int, y0: int, x1: int, y1:
 	return Vector2i(int(o.x), int(o.y))
 
 
-## Mirrors server EvaluateShot + range falloff.
+## Mirrors server EvaluateShot (additive formula).
 ## Returns {blocked, chance, wall, soft, distance}. Shooting always allowed at any d >= 1.
 static func evaluate_shot(
 	walls: Dictionary,
@@ -194,7 +201,6 @@ static func evaluate_shot(
 	target_posture: String
 ) -> Dictionary:
 	var dist := hex_distance(x0, y0, x1, y1)
-	var hit_range_mul := range_hit_mul(dist)
 
 	var obs := obstacles_on_shot(walls, x0, y0, x1, y1)
 	for o in obs:
@@ -206,7 +212,7 @@ static func evaluate_shot(
 				"soft": false,
 				"distance": dist,
 			}
-	# half/window next to shooter only (not next to target) do not count; rest of path as before.
+	# half/window next to shooter only (not next to target) do not count.
 	var path_obs: Array = []
 	for o in obs:
 		var kind := str(o.kind)
@@ -225,37 +231,53 @@ static func evaluate_shot(
 			"distance": dist,
 		}
 
-	var base := 1.0
+	var defense := 0.0
 	var soft_wall := Vector2i(-1, -1)
 	var has_soft := false
 	for o in path_obs:
 		var kind := str(o.kind)
 		if kind != "half" and kind != "window":
 			continue
-		var ch := _soft_base(target_posture, kind)
-		if not has_soft or ch < base:
-			base = ch
+		var d := _soft_defense(target_posture, kind)
+		if not has_soft or d > defense:
+			defense = d
 			soft_wall = Vector2i(int(o.x), int(o.y))
 			has_soft = true
 	if not has_soft:
-		base = rule_f("hit_base_cover_open", 0.9) if target_posture == "cover" else rule_f("hit_base_open", 1.0)
+		defense = _open_defense(target_posture)
 
-	var mul := rule_f("hit_mul_shooter_sit", 0.9) if shooter_posture == "sit" else rule_f("hit_mul_shooter_stand", 0.8)
+	var pose := rule_f("hit_pose_bonus_sit", 0.15) if shooter_posture == "sit" else rule_f("hit_pose_bonus_stand", 0.0)
+	var chance := (
+		rule_f("weapon_accuracy", 0.40)
+		+ rule_f("shooter_skill", 1.0) * rule_f("shooter_skill_mod", 0.5)
+		- range_hit_penalty(dist)
+		+ pose
+		- defense
+	)
+	chance = clampf(chance, 0.0, rule_f("hit_chance_cap", 0.95))
 	return {
 		"blocked": false,
-		"chance": base * mul * hit_range_mul,
+		"chance": chance,
 		"wall": soft_wall,
 		"soft": has_soft,
 		"distance": dist,
 	}
 
 
-static func _soft_base(target_posture: String, kind: String) -> float:
+static func _open_defense(target_posture: String) -> float:
+	if target_posture == "cover":
+		return rule_f("def_cover_open", 0.60)
 	if target_posture == "sit":
-		return rule_f("hit_base_sit_soft", 0.5)
+		return rule_f("def_sit_open", 0.15)
+	return rule_f("def_stand_open", 0.0)
+
+
+static func _soft_defense(target_posture: String, kind: String) -> float:
+	if target_posture == "sit":
+		return rule_f("def_sit_window", 0.40) if kind == "window" else rule_f("def_sit_half", 0.40)
 	if kind == "window":
-		return rule_f("hit_base_stand_window", 0.7)
-	return rule_f("hit_base_stand_half", 0.8)
+		return rule_f("def_stand_window", 0.20)
+	return rule_f("def_stand_half", 0.20)
 
 
 static func can_shoot_from(posture: String) -> bool:
