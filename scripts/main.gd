@@ -12,6 +12,10 @@ const CAM_HEIGHT := 28.0
 const CHAT_BOTTOM_FRAC := 0.28
 ## Extra gap above the real chat/players strip so the map does not sit under it.
 const CHAT_PAD_PX := 2.0
+## Max black void above the north edge of the map when panning up (viewport-px).
+const TOP_VOID_MAX_PX := 50.0
+## Max black void past left/right map edge when map is wider than the screen (viewport-px).
+const SIDE_VOID_MAX_PX := 100.0
 
 ## Battle-only ortho camera. Lobby/login must NEVER make this current.
 @onready var battle_camera: Camera3D = $Camera3D
@@ -328,38 +332,89 @@ func _ground_at_screen(screen_pos: Vector2) -> Vector3:
 	return from + dir * t
 
 
-func _map_dirt_south_z() -> float:
-	## Южный край коричневой земли (как на экране), не раздутый bounds.
-	var c := grid.map_center()
+func _map_dirt_half_ext() -> Vector3:
+	## Half-size of the visible dirt bed (plane = ext * 2.02).
 	var e := grid.map_extents()
-	return c.z + e.z * 1.01 # half of plane.size = ext * 2.02
+	return Vector3(e.x * 1.01, 0.0, e.z * 1.01)
+
+
+func _map_dirt_south_z() -> float:
+	return grid.map_center().z + _map_dirt_half_ext().z
+
+
+func _map_dirt_north_z() -> float:
+	return grid.map_center().z - _map_dirt_half_ext().z
+
+
+func _map_dirt_west_x() -> float:
+	return grid.map_center().x - _map_dirt_half_ext().x
+
+
+func _map_dirt_east_x() -> float:
+	return grid.map_center().x + _map_dirt_half_ext().x
 
 
 func _clamp_focus() -> void:
-	## Единственный упор (как в рабочем фиксе):
-	## сдвиг вниз поднимает карту — нельзя оставлять дыру больше CHAT_PAD над чатом.
-	## Вверх / в стороны свободно. Зум не трогаем.
-	## Считаем в мире по земле: луч через линию «чат − pad» vs юг грязи.
+	## Упоры (зум не меняем):
+	## вертикаль — чат/верх; горизонталь — центр если карта уже экрана, иначе void ≤ SIDE_VOID.
+	## Считаем по земле (лучи); UI→viewport через _ui_to_viewport.
 	_focus.y = 0.0
 	var vp := get_viewport().get_visible_rect()
 	var mid_x := vp.position.x + vp.size.x * 0.5
-	var limit_screen_y := _chat_strip_top_y() # верх чата − pad (уже в coords камеры)
+	var chat_limit_y := _chat_strip_top_y()
+	var top_limit_y := vp.position.y + TOP_VOID_MAX_PX
+	var mid_y := (vp.position.y + chat_limit_y) * 0.5
+	var left_x := vp.position.x
+	var right_x := vp.position.x + vp.size.x
 	var basis := Basis.from_euler(Vector3(deg_to_rad(CAM_PITCH_DEG), deg_to_rad(CAM_YAW_DEG), 0.0))
 	var screen_up := basis.y
 	screen_up.y = 0.0
-	if screen_up.length_squared() < 0.0001:
+	var screen_right := basis.x
+	screen_right.y = 0.0
+	if screen_up.length_squared() < 0.0001 or screen_right.length_squared() < 0.0001:
 		return
 	screen_up = screen_up.normalized()
+	screen_right = screen_right.normalized()
 	var map_south_z := _map_dirt_south_z()
-	for _i in 10:
+	var map_north_z := _map_dirt_north_z()
+	var map_west_x := _map_dirt_west_x()
+	var map_east_x := _map_dirt_east_x()
+	var map_w := map_east_x - map_west_x
+	var map_cx := grid.map_center().x
+	for _i in 12:
 		_apply_camera_from_focus()
-		var z_at_limit := _ground_at_screen(Vector2(mid_x, limit_screen_y)).z
-		# z_at_limit > map_south_z → линия над чатом южнее края карты → дыра слишком большая.
-		var excess_z := z_at_limit - map_south_z
-		if excess_z <= 0.02:
+		var dx := 0.0
+		var dz := 0.0
+		# --- вертикаль ---
+		var z_chat := _ground_at_screen(Vector2(mid_x, chat_limit_y)).z
+		var excess_south := z_chat - map_south_z
+		if excess_south > 0.02:
+			dz += excess_south
+		var z_top := _ground_at_screen(Vector2(mid_x, top_limit_y)).z
+		var excess_north := map_north_z - z_top
+		if excess_north > 0.02:
+			dz -= excess_north
+		# --- горизонталь ---
+		var x_view_l := _ground_at_screen(Vector2(left_x, mid_y)).x
+		var x_view_r := _ground_at_screen(Vector2(right_x, mid_y)).x
+		var view_w := absf(x_view_r - x_view_l)
+		if view_w >= map_w - 0.05:
+			# Карта уже экрана — только центр, сдвиг влево/вправо запрещён.
+			var view_cx := (x_view_l + x_view_r) * 0.5
+			dx = map_cx - view_cx
+		else:
+			# Карта шире — void у каждого края ≤ SIDE_VOID_MAX_PX.
+			var x_lim_l := _ground_at_screen(Vector2(left_x + SIDE_VOID_MAX_PX, mid_y)).x
+			var excess_west := map_west_x - x_lim_l
+			if excess_west > 0.02:
+				dx += excess_west # карта уехала вправо → взгляд восточнее
+			var x_lim_r := _ground_at_screen(Vector2(right_x - SIDE_VOID_MAX_PX, mid_y)).x
+			var excess_east := x_lim_r - map_east_x
+			if excess_east > 0.02:
+				dx -= excess_east # карта уехала влево → взгляд западнее
+		if absf(dx) <= 0.02 and absf(dz) <= 0.02:
 			break
-		# Взгляд на север → карта вниз по экрану → дыра схлопывается.
-		_focus += screen_up * excess_z
+		_focus += screen_right * dx + screen_up * dz
 		_focus.y = 0.0
 	_focus.y = 0.0
 
