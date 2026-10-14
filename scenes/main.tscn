@@ -1,4 +1,4 @@
-[gd_scene load_steps=16 format=3 uid="uid://zonezero_main"]
+[gd_scene load_steps=19 format=3 uid="uid://zonezero_main"]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/battle/grid_view.gd" id="2_grid"]
@@ -56,21 +56,69 @@ content_margin_top = 10
 content_margin_right = 14
 content_margin_bottom = 10
 
-[sub_resource type="StyleBoxFlat" id="StyleChatSend"]
-bg_color = Color(0.18, 0.18, 0.18, 1)
+[sub_resource type="StyleBoxFlat" id="StyleChatEdit"]
+bg_color = Color(0.12, 0.12, 0.12, 0.85)
 border_width_left = 1
 border_width_top = 1
 border_width_right = 1
 border_width_bottom = 1
-border_color = Color(0.85, 0.85, 0.85, 1)
-corner_radius_top_left = 3
-corner_radius_top_right = 3
-corner_radius_bottom_right = 3
-corner_radius_bottom_left = 3
-content_margin_left = 16
-content_margin_top = 8
-content_margin_right = 16
-content_margin_bottom = 8
+border_color = Color(0.32, 0.32, 0.32, 0.7)
+corner_radius_top_left = 2
+corner_radius_top_right = 2
+corner_radius_bottom_right = 2
+corner_radius_bottom_left = 2
+content_margin_left = 6
+content_margin_top = 2
+content_margin_right = 6
+content_margin_bottom = 2
+
+[sub_resource type="StyleBoxFlat" id="StyleChatEditFocus"]
+bg_color = Color(0.14, 0.14, 0.14, 0.9)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.42, 0.42, 0.42, 0.8)
+corner_radius_top_left = 2
+corner_radius_top_right = 2
+corner_radius_bottom_right = 2
+corner_radius_bottom_left = 2
+content_margin_left = 6
+content_margin_top = 2
+content_margin_right = 6
+content_margin_bottom = 2
+
+[sub_resource type="StyleBoxFlat" id="StyleChatSend"]
+bg_color = Color(0.16, 0.16, 0.16, 0.9)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.34, 0.34, 0.34, 0.75)
+corner_radius_top_left = 2
+corner_radius_top_right = 2
+corner_radius_bottom_right = 2
+corner_radius_bottom_left = 2
+content_margin_left = 2
+content_margin_top = 1
+content_margin_right = 2
+content_margin_bottom = 1
+
+[sub_resource type="StyleBoxFlat" id="StyleChatSendHover"]
+bg_color = Color(0.22, 0.22, 0.22, 0.95)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.45, 0.45, 0.45, 0.85)
+corner_radius_top_left = 2
+corner_radius_top_right = 2
+corner_radius_bottom_right = 2
+corner_radius_bottom_left = 2
+content_margin_left = 2
+content_margin_top = 1
+content_margin_right = 2
+content_margin_bottom = 1
 
 [sub_resource type="StyleBoxFlat" id="StylePlayersTitle"]
 bg_color = Color(0, 0, 0, 0)
@@ -100,20 +148,27 @@ content_margin_top = 22
 content_margin_right = 28
 content_margin_bottom = 22
 
-[node name="Main" type="Node2D"]
+[node name="Main" type="Node"]
 script = ExtResource("1_main")
 
-[node name="Camera2D" type="Camera2D" parent="."]
-zoom = Vector2(0.85, 0.85)
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.573576, 0.819152, 0, -0.819152, 0.573576, 25, 28, 45)
+projection = 1
+size = 22.0
+current = true
 
-[node name="World" type="Node2D" parent="."]
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866025, -0.353553, 0.353553, 0, 0.707107, 0.707107, -0.5, -0.612372, 0.612372, 0, 20, 0)
+shadow_enabled = true
+light_energy = 1.15
+
+[node name="World" type="Node3D" parent="."]
 visible = false
 
-[node name="Grid" type="Node2D" parent="World"]
+[node name="Grid" type="Node3D" parent="World"]
 script = ExtResource("2_grid")
 
-[node name="Units" type="Node2D" parent="World"]
-z_index = 1
+[node name="Units" type="Node3D" parent="World"]
 
 [node name="WSClient" type="Node" parent="."]
 script = ExtResource("3_ws")
@@ -130,62 +185,78 @@ anchors_preset = 12
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 16.0
-offset_top = -240.0
-offset_right = -268.0
-offset_bottom = -16.0
+offset_left = 2.0
+offset_top = -148.0
+offset_right = -163.0
+offset_bottom = -2.0
 grow_horizontal = 2
 grow_vertical = 0
 mouse_filter = 0
 
 [node name="Margin" type="MarginContainer" parent="UI/ChatDock"]
 layout_mode = 2
-theme_override_constants/margin_left = 12
-theme_override_constants/margin_top = 10
-theme_override_constants/margin_right = 12
-theme_override_constants/margin_bottom = 10
+theme_override_constants/margin_left = 1
+theme_override_constants/margin_top = 1
+theme_override_constants/margin_right = 1
+theme_override_constants/margin_bottom = 1
 
 [node name="VBox" type="VBoxContainer" parent="UI/ChatDock/Margin"]
 layout_mode = 2
-theme_override_constants/separation = 6
+theme_override_constants/separation = 2
 
 [node name="Tabs" type="TabContainer" parent="UI/ChatDock/Margin/VBox"]
 layout_mode = 2
 size_flags_vertical = 3
-theme_override_font_sizes/font_size = 13
+theme_override_constants/side_margin = 0
+theme_override_font_sizes/font_size = 9
 
 [node name="Лобби" type="RichTextLabel" parent="UI/ChatDock/Margin/VBox/Tabs"]
 layout_mode = 2
 bbcode_enabled = true
 scroll_following = true
-custom_minimum_size = Vector2(0, 120)
+custom_minimum_size = Vector2(0, 56)
+theme_override_font_sizes/normal_font_size = 9
+theme_override_font_sizes/bold_font_size = 9
 
 [node name="Бой" type="RichTextLabel" parent="UI/ChatDock/Margin/VBox/Tabs"]
 visible = false
 layout_mode = 2
 bbcode_enabled = true
 scroll_following = true
-custom_minimum_size = Vector2(0, 120)
+custom_minimum_size = Vector2(0, 56)
+theme_override_font_sizes/normal_font_size = 9
+theme_override_font_sizes/bold_font_size = 9
 
 [node name="InputRow" type="HBoxContainer" parent="UI/ChatDock/Margin/VBox"]
-custom_minimum_size = Vector2(0, 40)
+custom_minimum_size = Vector2(0, 20)
 layout_mode = 2
-theme_override_constants/separation = 8
+theme_override_constants/separation = 3
 
 [node name="ChatEdit" type="LineEdit" parent="UI/ChatDock/Margin/VBox/InputRow"]
-custom_minimum_size = Vector2(0, 40)
+custom_minimum_size = Vector2(0, 20)
 layout_mode = 2
 size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.82, 0.82, 0.82, 1)
+theme_override_colors/font_placeholder_color = Color(0.5, 0.5, 0.5, 0.75)
+theme_override_font_sizes/font_size = 9
+theme_override_styles/normal = SubResource("StyleChatEdit")
+theme_override_styles/focus = SubResource("StyleChatEditFocus")
+theme_override_styles/read_only = SubResource("StyleChatEdit")
 placeholder_text = "Сообщение..."
 
 [node name="SendBtn" type="Button" parent="UI/ChatDock/Margin/VBox/InputRow"]
-custom_minimum_size = Vector2(120, 40)
+custom_minimum_size = Vector2(22, 20)
 layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.75, 0.75, 1)
+theme_override_colors/font_hover_color = Color(0.92, 0.92, 0.92, 1)
+theme_override_font_sizes/font_size = 11
 theme_override_styles/normal = SubResource("StyleChatSend")
-theme_override_styles/hover = SubResource("StyleChatSend")
+theme_override_styles/hover = SubResource("StyleChatSendHover")
 theme_override_styles/pressed = SubResource("StyleChatSend")
 theme_override_styles/focus = SubResource("StyleChatSend")
-text = "Отправить"
+theme_override_styles/disabled = SubResource("StyleChatSend")
+text = "↑"
+flat = false
 
 [node name="LoginScreen" type="Control" parent="UI"]
 layout_mode = 3
@@ -313,47 +384,47 @@ layout_mode = 1
 anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
-offset_left = -240.0
-offset_top = 16.0
-offset_right = -16.0
-offset_bottom = 168.0
+offset_left = -132.0
+offset_top = 4.0
+offset_right = -2.0
+offset_bottom = 78.0
 grow_horizontal = 0
 
 [node name="VBox" type="VBoxContainer" parent="UI/LobbyScreen/PlayerCard"]
 layout_mode = 2
-theme_override_constants/separation = 6
+theme_override_constants/separation = 0
 
 [node name="CardTitle" type="Label" parent="UI/LobbyScreen/PlayerCard/VBox"]
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_colors/font_color = Color(0.85, 0.85, 0.85, 1)
+size_flags_vertical = 0
+theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
+theme_override_font_sizes/font_size = 11
 theme_override_styles/normal = SubResource("StylePlayersTitle")
-text = "Персонаж"
+text = "Nick"
 horizontal_alignment = 1
 
 [node name="InfoMargin" type="MarginContainer" parent="UI/LobbyScreen/PlayerCard/VBox"]
 layout_mode = 2
-theme_override_constants/margin_left = 10
+size_flags_vertical = 0
+theme_override_constants/margin_left = 3
 theme_override_constants/margin_top = 0
-theme_override_constants/margin_right = 10
-theme_override_constants/margin_bottom = 10
+theme_override_constants/margin_right = 3
+theme_override_constants/margin_bottom = 2
 
 [node name="InfoVBox" type="VBoxContainer" parent="UI/LobbyScreen/PlayerCard/VBox/InfoMargin"]
 layout_mode = 2
-theme_override_constants/separation = 6
-
-[node name="NickLabel" type="Label" parent="UI/LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox"]
-layout_mode = 2
-text = "Nick"
-horizontal_alignment = 1
+theme_override_constants/separation = 0
 
 [node name="HPLabel" type="Label" parent="UI/LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox"]
 layout_mode = 2
+theme_override_font_sizes/font_size = 10
 text = "ХП: 100"
 horizontal_alignment = 1
 
 [node name="APLabel" type="Label" parent="UI/LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox"]
 layout_mode = 2
+theme_override_font_sizes/font_size = 10
 text = "ОД: 16"
 horizontal_alignment = 1
 
@@ -362,7 +433,7 @@ layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_bottom = -240.0
+offset_bottom = -154.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
@@ -391,28 +462,29 @@ anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -252.0
-offset_top = -240.0
-offset_right = -16.0
-offset_bottom = -16.0
+offset_left = -160.0
+offset_top = -148.0
+offset_right = -2.0
+offset_bottom = -2.0
 grow_horizontal = 0
 grow_vertical = 0
-theme_override_constants/separation = 12
+theme_override_constants/separation = 2
 
 [node name="PlayersPanel" type="PanelContainer" parent="UI/BottomBar"]
-custom_minimum_size = Vector2(220, 0)
+custom_minimum_size = Vector2(150, 0)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_stretch_ratio = 1.0
 
 [node name="VBox" type="VBoxContainer" parent="UI/BottomBar/PlayersPanel"]
 layout_mode = 2
-theme_override_constants/separation = 6
+theme_override_constants/separation = 2
 
 [node name="ListTitle" type="Label" parent="UI/BottomBar/PlayersPanel/VBox"]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_colors/font_color = Color(0.85, 0.85, 0.85, 1)
+theme_override_font_sizes/font_size = 11
 theme_override_styles/normal = SubResource("StylePlayersTitle")
 text = "Игроки"
 horizontal_alignment = 1
@@ -423,8 +495,9 @@ size_flags_vertical = 3
 focus_mode = 0
 allow_rmb_select = false
 allow_reselect = false
+theme_override_font_sizes/font_size = 11
 theme_override_colors/guide_color = Color(0, 0, 0, 0)
-theme_override_constants/v_separation = 4
+theme_override_constants/v_separation = 2
 theme_override_styles/selected = SubResource("StylePlayerListEmpty")
 theme_override_styles/selected_focus = SubResource("StylePlayerListEmpty")
 theme_override_styles/cursor = SubResource("StylePlayerListEmpty")
@@ -443,53 +516,55 @@ mouse_filter = 2
 [node name="BattlePanel" type="PanelContainer" parent="UI/BattleHud"]
 layout_mode = 1
 anchors_preset = 0
-offset_left = 16.0
-offset_top = 16.0
-offset_right = 280.0
-offset_bottom = 520.0
+offset_left = 6.0
+offset_top = 6.0
+offset_right = 148.0
+offset_bottom = 278.0
 
 [node name="VBox" type="VBoxContainer" parent="UI/BattleHud/BattlePanel"]
 layout_mode = 2
-theme_override_constants/separation = 6
+theme_override_constants/separation = 1
 
 [node name="Title" type="Label" parent="UI/BattleHud/BattlePanel/VBox"]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_colors/font_color = Color(0.85, 0.85, 0.85, 1)
+theme_override_font_sizes/font_size = 10
 theme_override_styles/normal = SubResource("StylePlayersTitle")
 text = "Бой"
 horizontal_alignment = 1
 
 [node name="InfoMargin" type="MarginContainer" parent="UI/BattleHud/BattlePanel/VBox"]
 layout_mode = 2
-theme_override_constants/margin_left = 10
-theme_override_constants/margin_top = 4
-theme_override_constants/margin_right = 10
-theme_override_constants/margin_bottom = 10
+theme_override_constants/margin_left = 3
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 3
+theme_override_constants/margin_bottom = 3
 
 [node name="InfoVBox" type="VBoxContainer" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin"]
 layout_mode = 2
-theme_override_constants/separation = 8
+theme_override_constants/separation = 1
 
 [node name="TurnLabel" type="Label" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox"]
 layout_mode = 2
+theme_override_font_sizes/font_size = 9
 text = "Ход 1"
 horizontal_alignment = 1
 
 [node name="TimerLabel" type="Label" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 22
+theme_override_font_sizes/font_size = 13
 text = "0:30"
 horizontal_alignment = 1
 
 [node name="EndBtn" type="Button" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox"]
-custom_minimum_size = Vector2(0, 44)
+custom_minimum_size = Vector2(0, 20)
 layout_mode = 2
 theme_override_colors/font_color = Color(0.98, 0.93, 0.82, 1)
 theme_override_colors/font_hover_color = Color(1, 0.97, 0.9, 1)
 theme_override_colors/font_pressed_color = Color(0.9, 0.84, 0.72, 1)
 theme_override_colors/font_disabled_color = Color(0.75, 0.68, 0.55, 0.7)
-theme_override_font_sizes/font_size = 16
+theme_override_font_sizes/font_size = 9
 theme_override_styles/normal = SubResource("StyleLoginBtnNormal")
 theme_override_styles/hover = SubResource("StyleLoginBtnHover")
 theme_override_styles/pressed = SubResource("StyleLoginBtnPressed")
@@ -499,49 +574,52 @@ text = "Конец хода"
 
 [node name="PostureRow" type="HBoxContainer" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox"]
 layout_mode = 2
-theme_override_constants/separation = 4
+theme_override_constants/separation = 2
 
 [node name="StandBtn" type="Button" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox/PostureRow"]
+custom_minimum_size = Vector2(0, 18)
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 12
+theme_override_font_sizes/font_size = 8
 text = "Стоя"
 
 [node name="SitBtn" type="Button" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox/PostureRow"]
+custom_minimum_size = Vector2(0, 18)
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 12
+theme_override_font_sizes/font_size = 8
 text = "Сидя"
 
 [node name="CoverBtn" type="Button" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox/PostureRow"]
+custom_minimum_size = Vector2(0, 18)
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 12
+theme_override_font_sizes/font_size = 8
 text = "Укрылся"
 
 [node name="MedkitBtn" type="Button" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox"]
-custom_minimum_size = Vector2(0, 36)
+custom_minimum_size = Vector2(0, 18)
 layout_mode = 2
-theme_override_font_sizes/font_size = 14
-text = "Аптечка ×5 (+15 ХП / 5 ОД)"
+theme_override_font_sizes/font_size = 8
+text = "Аптечка ×5"
 
 [node name="UndoBtn" type="Button" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox"]
-custom_minimum_size = Vector2(0, 36)
+custom_minimum_size = Vector2(0, 18)
 layout_mode = 2
-theme_override_font_sizes/font_size = 14
+theme_override_font_sizes/font_size = 9
 text = "Отменить"
 
 [node name="HistoryLabel" type="Label" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 12
+theme_override_font_sizes/font_size = 8
 text = "План"
 horizontal_alignment = 1
 
 [node name="HistoryList" type="ItemList" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox"]
-custom_minimum_size = Vector2(0, 120)
+custom_minimum_size = Vector2(0, 52)
 layout_mode = 2
-size_flags_vertical = 3
-theme_override_font_sizes/font_size = 12
+size_flags_vertical = 0
+theme_override_font_sizes/font_size = 8
 allow_reselect = false
 auto_height = false
 
@@ -550,52 +628,53 @@ layout_mode = 1
 anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
-offset_left = -240.0
-offset_top = 16.0
-offset_right = -16.0
-offset_bottom = 196.0
+offset_left = -132.0
+offset_top = 4.0
+offset_right = -2.0
+offset_bottom = 78.0
 grow_horizontal = 0
 
 [node name="VBox" type="VBoxContainer" parent="UI/BattleHud/PlayerCard"]
 layout_mode = 2
-theme_override_constants/separation = 6
+theme_override_constants/separation = 0
 
 [node name="CardTitle" type="Label" parent="UI/BattleHud/PlayerCard/VBox"]
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_colors/font_color = Color(0.85, 0.85, 0.85, 1)
+size_flags_vertical = 0
+theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
+theme_override_font_sizes/font_size = 11
 theme_override_styles/normal = SubResource("StylePlayersTitle")
-text = "Персонаж"
+text = "Nick"
 horizontal_alignment = 1
 
 [node name="InfoMargin" type="MarginContainer" parent="UI/BattleHud/PlayerCard/VBox"]
 layout_mode = 2
-theme_override_constants/margin_left = 10
+size_flags_vertical = 0
+theme_override_constants/margin_left = 3
 theme_override_constants/margin_top = 0
-theme_override_constants/margin_right = 10
-theme_override_constants/margin_bottom = 10
+theme_override_constants/margin_right = 3
+theme_override_constants/margin_bottom = 2
 
 [node name="InfoVBox" type="VBoxContainer" parent="UI/BattleHud/PlayerCard/VBox/InfoMargin"]
 layout_mode = 2
-theme_override_constants/separation = 6
-
-[node name="NickLabel" type="Label" parent="UI/BattleHud/PlayerCard/VBox/InfoMargin/InfoVBox"]
-layout_mode = 2
-text = "Nick"
-horizontal_alignment = 1
+theme_override_constants/separation = 0
 
 [node name="HPLabel" type="Label" parent="UI/BattleHud/PlayerCard/VBox/InfoMargin/InfoVBox"]
 layout_mode = 2
+theme_override_font_sizes/font_size = 10
 text = "ХП: 100"
 horizontal_alignment = 1
 
 [node name="APLabel" type="Label" parent="UI/BattleHud/PlayerCard/VBox/InfoMargin/InfoVBox"]
 layout_mode = 2
+theme_override_font_sizes/font_size = 10
 text = "ОД: 16"
 horizontal_alignment = 1
 
 [node name="PostureLabel" type="Label" parent="UI/BattleHud/PlayerCard/VBox/InfoMargin/InfoVBox"]
 layout_mode = 2
+theme_override_font_sizes/font_size = 10
 text = "Стойка: стоя"
 horizontal_alignment = 1
 

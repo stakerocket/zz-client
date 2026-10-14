@@ -28,7 +28,7 @@ var _in_battle_ui: bool = false
 @onready var continue_btn: Button = $LoginScreen/Center/Panel/Margin/InnerCenter/VBox/ContinueBtn
 @onready var login_error: Label = $LoginScreen/Center/Panel/Margin/InnerCenter/VBox/ErrorLabel
 
-@onready var lobby_nick: Label = $LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox/NickLabel
+@onready var lobby_nick: Label = $LobbyScreen/PlayerCard/VBox/CardTitle
 @onready var lobby_hp: Label = $LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox/HPLabel
 @onready var lobby_ap: Label = $LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox/APLabel
 @onready var find_btn: Button = $LobbyScreen/FindCenter/FindBtn
@@ -49,7 +49,7 @@ var _in_battle_ui: bool = false
 @onready var medkit_btn: Button = $BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox/MedkitBtn
 @onready var undo_btn: Button = $BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox/UndoBtn
 @onready var history_list: ItemList = $BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox/HistoryList
-@onready var battle_nick: Label = $BattleHud/PlayerCard/VBox/InfoMargin/InfoVBox/NickLabel
+@onready var battle_nick: Label = $BattleHud/PlayerCard/VBox/CardTitle
 @onready var battle_hp: Label = $BattleHud/PlayerCard/VBox/InfoMargin/InfoVBox/HPLabel
 @onready var battle_ap: Label = $BattleHud/PlayerCard/VBox/InfoMargin/InfoVBox/APLabel
 @onready var battle_posture: Label = $BattleHud/PlayerCard/VBox/InfoMargin/InfoVBox/PostureLabel
@@ -82,6 +82,9 @@ func _ready() -> void:
 	move_child(chat_dock, get_child_count() - 1)
 	move_child(bottom_bar, get_child_count() - 1)
 	lobby_screen.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# Chat + players panel must block map clicks (STOP).
+	chat_dock.mouse_filter = Control.MOUSE_FILTER_STOP
+	bottom_bar.mouse_filter = Control.MOUSE_FILTER_STOP
 	show_login()
 
 
@@ -212,8 +215,8 @@ func set_medkit_enabled(enabled: bool) -> void:
 	medkit_btn.disabled = not enabled
 
 
-func set_medkit_count(count: int, heal: int = 15, ap_cost: int = 5) -> void:
-	medkit_btn.text = "Аптечка ×%d (+%d ХП / %d ОД)" % [maxi(0, count), heal, ap_cost]
+func set_medkit_count(count: int, heal_min: int = 15, heal_max: int = 30, ap_cost: int = 3) -> void:
+	medkit_btn.text = "Аптечка ×%d (+%d–%d / %d)" % [maxi(0, count), heal_min, heal_max, ap_cost]
 
 
 func set_undo_enabled(enabled: bool) -> void:
@@ -237,24 +240,28 @@ func _set_social_visible(visible: bool) -> void:
 
 
 func _layout_social() -> void:
-	# Fixed strip: chat left, players right — identical in every screen.
+	# Fixed strip: chat left, players right — compact, tight to screen edges.
+	const EDGE := 2.0
+	const GAP := 1.0
+	const STRIP_H := 148.0
+	const PLAYERS_W := 160.0
 	chat_dock.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	chat_dock.anchor_left = 0.0
 	chat_dock.anchor_right = 1.0
-	chat_dock.offset_left = 16.0
-	chat_dock.offset_right = -268.0
-	chat_dock.offset_top = -240.0
-	chat_dock.offset_bottom = -16.0
+	chat_dock.offset_left = EDGE
+	chat_dock.offset_right = -(PLAYERS_W + EDGE + GAP)
+	chat_dock.offset_top = -STRIP_H
+	chat_dock.offset_bottom = -EDGE
 	chat_dock.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	bottom_bar.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
 	bottom_bar.anchor_left = 1.0
 	bottom_bar.anchor_right = 1.0
 	bottom_bar.anchor_top = 1.0
 	bottom_bar.anchor_bottom = 1.0
-	bottom_bar.offset_left = -252.0
-	bottom_bar.offset_right = -16.0
-	bottom_bar.offset_top = -240.0
-	bottom_bar.offset_bottom = -16.0
+	bottom_bar.offset_left = -PLAYERS_W
+	bottom_bar.offset_right = -EDGE
+	bottom_bar.offset_top = -STRIP_H
+	bottom_bar.offset_bottom = -EDGE
 	bottom_bar.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 
 

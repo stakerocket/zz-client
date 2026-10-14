@@ -6,8 +6,9 @@ var move_cost_stand: int = 1
 var move_cost_sit: int = 2
 var shoot_cost: int = 4
 var posture_cost: int = 1
-var medkit_cost: int = 5
-var medkit_heal: int = 15
+var medkit_cost: int = 3
+var medkit_heal_min: int = 15
+var medkit_heal_max: int = 30
 var medkit_max: int = 5
 ## Max AP pool per turn (from server rules.initial_ap).
 var max_ap: int = 16
@@ -31,7 +32,7 @@ signal chat_received(nick: String, text: String, channel: String)
 
 var ws: ZZWSClient
 var grid: ZZGridView
-var units_root: Node2D
+var units_root: Node3D
 
 var local_nick: String = ""
 var your_id: String = ""
@@ -66,13 +67,14 @@ var _colors := {
 }
 
 
-func setup(ws_client: ZZWSClient, grid_view: ZZGridView, units: Node2D) -> void:
+func setup(ws_client: ZZWSClient, grid_view: ZZGridView, units: Node3D) -> void:
 	ws = ws_client
 	grid = grid_view
 	units_root = units
 	ws.message_received.connect(_on_message)
 	grid.tile_clicked.connect(_on_tile_clicked)
 	grid.tile_hovered.connect(_on_tile_hovered)
+	grid.unit_cell_pick = _pick_unit_cell_at_screen
 
 
 func set_local_nick(nick: String) -> void:
@@ -148,8 +150,6 @@ func request_medkit() -> void:
 		return
 	if local_ap < medkit_cost:
 		return
-	if local_hp >= max_hp:
-		return
 	if local_medkits <= 0:
 		return
 	action_queue.append(ZZProtocol.medkit_action())
@@ -165,7 +165,16 @@ func request_undo() -> void:
 		return
 	if action_queue.is_empty():
 		return
-	action_queue.pop_back()
+	# Path was queued as many move actions — undo the whole trailing streak at once.
+	var last: Variant = action_queue[action_queue.size() - 1]
+	if typeof(last) == TYPE_DICTIONARY and str(last.get("type", "")) == "move":
+		while not action_queue.is_empty():
+			var a: Variant = action_queue[action_queue.size() - 1]
+			if typeof(a) != TYPE_DICTIONARY or str(a.get("type", "")) != "move":
+				break
+			action_queue.pop_back()
+	else:
+		action_queue.pop_back()
 	_recompute_local_from_queue()
 
 
@@ -287,7 +296,10 @@ func _apply_combat_rules(rules: Variant) -> void:
 	shoot_cost = ZZLos.rule_i("shoot_ap", shoot_cost)
 	posture_cost = ZZLos.rule_i("posture_ap", posture_cost)
 	medkit_cost = ZZLos.rule_i("medkit_ap", medkit_cost)
-	medkit_heal = ZZLos.rule_i("medkit_heal", medkit_heal)
+	medkit_heal_min = ZZLos.rule_i("medkit_heal_min", medkit_heal_min)
+	medkit_heal_max = ZZLos.rule_i("medkit_heal_max", medkit_heal_max)
+	if medkit_heal_max < medkit_heal_min:
+		medkit_heal_max = medkit_heal_min
 	medkit_max = ZZLos.rule_i("medkit_max", medkit_max)
 	max_ap = maxi(1, ZZLos.rule_i("initial_ap", max_ap))
 
@@ -303,8 +315,48 @@ func _play_events(events: Variant) -> void:
 	var list: Array = _as_array(events)
 	if list.is_empty():
 		return
-	for group in _group_events_by_clock(list):
-		await _play_event_group(group)
+	var groups := _group_events_by_clock(list)
+	var gi := 0
+	while gi < groups.size():
+		var group: Array = groups[gi]
+		# Same as local planning: one continuous run for a streak of solo moves.
+		if _is_solo_move_group(group):
+			var chain: Array = [group[0]]
+			var actor_id := str(group[0].get("actor_id", ""))
+			var j := gi + 1
+			while j < groups.size() and _is_solo_move_group(groups[j]):
+				var nxt_e: Dictionary = groups[j][0]
+				if str(nxt_e.get("actor_id", "")) != actor_id:
+					break
+				chain.append(nxt_e)
+				j += 1
+			await _play_move_chain(chain)
+			gi = j
+		else:
+			await _play_event_group(group, groups, gi)
+			gi += 1
+
+
+func _is_solo_move_group(group: Array) -> bool:
+	if group.size() != 1 or typeof(group[0]) != TYPE_DICTIONARY:
+		return false
+	return str(group[0].get("type", "")) == "move"
+
+
+func _actor_move_continues(groups: Array, gi: int, actor_id: String) -> bool:
+	for j in range(gi + 1, groups.size()):
+		var g: Array = groups[j]
+		for ev in g:
+			if typeof(ev) != TYPE_DICTIONARY:
+				continue
+			var e: Dictionary = ev
+			var t := str(e.get("type", ""))
+			if t == "move" and str(e.get("actor_id", "")) == actor_id:
+				return true
+			# Any other action by this actor breaks the run streak.
+			if str(e.get("actor_id", "")) == actor_id and t != "move":
+				return false
+	return false
 
 
 func _as_array(value: Variant) -> Array:
@@ -334,28 +386,32 @@ func _group_events_by_clock(list: Array) -> Array:
 	return groups
 
 
-func _play_event_group(group: Array) -> void:
+func _play_event_group(group: Array, groups: Array = [], gi: int = 0) -> void:
 	if group.is_empty():
 		return
 	if group.size() == 1:
-		await _play_one_event(group[0])
+		await _play_one_event(group[0], groups, gi)
 		return
 	var pending := {"n": group.size()}
 	for e in group:
-		_play_one_event_parallel(e, pending)
+		_play_one_event_parallel(e, pending, groups, gi)
 	while int(pending.n) > 0:
 		await get_tree().process_frame
 
 
-func _play_one_event_parallel(e: Dictionary, pending: Dictionary) -> void:
-	await _play_one_event(e)
+func _play_one_event_parallel(e: Dictionary, pending: Dictionary, groups: Array = [], gi: int = 0) -> void:
+	await _play_one_event(e, groups, gi)
 	pending.n = int(pending.n) - 1
 
 
-func _play_one_event(e: Dictionary) -> void:
+func _play_one_event(e: Dictionary, groups: Array = [], gi: int = 0) -> void:
 	match str(e.get("type", "")):
 		"move":
-			await _play_move_event(e)
+			var actor_id := str(e.get("actor_id", ""))
+			var stop_at_end := true
+			if not groups.is_empty():
+				stop_at_end = not _actor_move_continues(groups, gi, actor_id)
+			await _play_move_event(e, stop_at_end)
 		"posture":
 			await _play_posture_event(e)
 		"medkit":
@@ -399,16 +455,41 @@ func _play_posture_event(e: Dictionary) -> void:
 	await get_tree().create_timer(0.12).timeout
 
 
-func _play_move_event(e: Dictionary) -> void:
+func _play_move_chain(events: Array) -> void:
+	if events.is_empty():
+		return
+	var first: Dictionary = events[0]
+	var actor_id := str(first.get("actor_id", ""))
+	var uv: ZZUnitView = unit_nodes.get(actor_id)
+	if uv == null or not is_instance_valid(uv):
+		return
+	var from0 := Vector2i(int(first.get("from_x", 0)), int(first.get("from_y", 0)))
+	# Rewind once to path start (local prediction already finished at destination).
+	uv.position = grid.grid_to_world(from0.x, from0.y)
+	for i in range(events.size()):
+		var e: Dictionary = events[i]
+		var to := Vector2i(int(e.get("to_x", 0)), int(e.get("to_y", 0)))
+		var stop_at_end := i == events.size() - 1
+		await uv.animate_move_to(grid.grid_to_world(to.x, to.y), i == 0, stop_at_end)
+		if players.has(actor_id):
+			players[actor_id]["x"] = to.x
+			players[actor_id]["y"] = to.y
+		if actor_id == your_id:
+			local_pos = to
+
+
+func _play_move_event(e: Dictionary, stop_at_end: bool = true) -> void:
 	var actor_id := str(e.get("actor_id", ""))
 	var uv: ZZUnitView = unit_nodes.get(actor_id)
 	if uv == null or not is_instance_valid(uv):
 		return
 	var from := Vector2i(int(e.get("from_x", 0)), int(e.get("from_y", 0)))
 	var to := Vector2i(int(e.get("to_x", 0)), int(e.get("to_y", 0)))
-	# Rewind local prediction so the move tween is visible after planning.
-	uv.position = grid.grid_to_world(from.x, from.y)
-	await uv.animate_move_to(grid.grid_to_world(to.x, to.y), true)
+	var from_w := grid.grid_to_world(from.x, from.y)
+	# Avoid micro-snaps between chained steps (planning path is already smooth).
+	if uv.global_position.distance_squared_to(from_w) > 0.0004:
+		uv.position = from_w
+	await uv.animate_move_to(grid.grid_to_world(to.x, to.y), false, stop_at_end)
 	if players.has(actor_id):
 		players[actor_id]["x"] = to.x
 		players[actor_id]["y"] = to.y
@@ -422,10 +503,14 @@ func _play_shoot_event(e: Dictionary) -> void:
 	var actor: ZZUnitView = unit_nodes.get(actor_id)
 	if actor == null or not is_instance_valid(actor):
 		return
-	var impact := grid.grid_to_world(int(e.get("to_x", 0)), int(e.get("to_y", 0)))
+	var impact := grid.grid_to_world(int(e.get("to_x", 0)), int(e.get("to_y", 0))) + Vector3(0, 1.4, 0)
 	var hit_wall := bool(e.get("hit_wall", false))
+	actor.face_world(impact)
+	# Fire pose + bolt slightly overlap for snappier feedback.
+	actor.play_fire()
 	Sfx.play_shoot()
-	await _fly_projectile(actor.global_position, impact, actor.color)
+	await get_tree().create_timer(0.12).timeout
+	await _fly_projectile(_unit_muzzle(actor), impact, actor.color)
 	if hit_wall:
 		Sfx.play_hit_wall()
 		await _wall_burst_at(impact)
@@ -437,11 +522,11 @@ func _play_shoot_event(e: Dictionary) -> void:
 	var hp_after := int(e.get("hp_after", 0))
 	if damage > 0:
 		Sfx.play_hit_target()
-		await target.apply_hit(damage, hp_after)
+		await target.apply_hit(damage, hp_after, _is_death_front_blocked(target_id, target))
 	else:
 		Sfx.play_miss()
 		await target.apply_miss()
-		target.set_hp(hp_after, true)
+		target.set_hp(hp_after, true, _is_death_front_blocked(target_id, target))
 	if players.has(target_id):
 		players[target_id]["hp"] = hp_after
 	if target_id == your_id:
@@ -449,23 +534,103 @@ func _play_shoot_event(e: Dictionary) -> void:
 		hp_changed.emit(local_hp)
 
 
-func _fly_projectile(from: Vector2, to: Vector2, tint: Color, preview: bool = false) -> void:
-	var bolt: Node2D = ProjectileBoltScript.new()
-	bolt.z_index = 30
+func _unit_muzzle(uv: ZZUnitView) -> Vector3:
+	return uv.global_position + Vector3(0, ZZUnitView.CAPSULE_HEIGHT * 0.62, 0)
+
+
+func _pick_unit_cell_at_screen(screen_pos: Vector2) -> Vector2i:
+	var pid := _unit_id_at_screen(screen_pos)
+	if pid == "" or not players.has(pid):
+		return Vector2i(-1, -1)
+	var pd: Dictionary = players[pid]
+	if int(pd.get("hp", 0)) <= 0:
+		return Vector2i(-1, -1)
+	return Vector2i(int(pd.get("x", -1)), int(pd.get("y", -1)))
+
+
+func _unit_id_at_screen(screen_pos: Vector2) -> String:
+	var cam := get_viewport().get_camera_3d()
+	if cam == null:
+		return ""
+	var origin := cam.project_ray_origin(screen_pos)
+	var dir := cam.project_ray_normal(screen_pos)
+	if dir.length_squared() < 0.0001:
+		return ""
+	dir = dir.normalized()
+	var best_id := ""
+	var best_t := INF
+	var pick_r := ZZGridView.HEX_SIZE * 0.9
+	var pick_h := ZZUnitView.CAPSULE_HEIGHT * ZZUnitView.MODEL_SCALE * 0.55
+	for pid in unit_nodes.keys():
+		var uv: ZZUnitView = unit_nodes[pid]
+		if uv == null or not is_instance_valid(uv) or uv.is_dead or uv.is_dying:
+			continue
+		var t := _ray_hit_unit_t(origin, dir, uv.global_position, pick_h, pick_r)
+		if t >= 0.0 and t < best_t:
+			best_t = t
+			best_id = str(pid)
+	return best_id
+
+
+func _ray_hit_unit_t(origin: Vector3, dir: Vector3, feet: Vector3, height: float, radius: float) -> float:
+	# Closest approach between camera ray and vertical unit axis.
+	var axis_b := feet + Vector3(0, maxf(height, 0.5), 0)
+	var ray_b := origin + dir * 250.0
+	var pts := Geometry3D.get_closest_points_between_segments(origin, ray_b, feet, axis_b)
+	if pts.size() < 2:
+		return -1.0
+	if pts[0].distance_to(pts[1]) > radius:
+		return -1.0
+	var t := (pts[0] - origin).dot(dir)
+	if t < 0.0:
+		return -1.0
+	return t
+
+
+func _is_death_front_blocked(pid: String, uv: ZZUnitView) -> bool:
+	if grid == null or uv == null or not is_instance_valid(uv):
+		return false
+	var pd: Dictionary = players.get(pid, {})
+	var cell := Vector2i(int(pd.get("x", 0)), int(pd.get("y", 0)))
+	var facing := uv.facing_forward_xz()
+	var origin := grid.grid_to_world(cell.x, cell.y)
+	var best_n := Vector2i(-1, -1)
+	var best_dot := -INF
+	for n in ZZLos.hex_neighbors(cell.x, cell.y):
+		var nb: Vector2i = n
+		if nb.x < 0 or nb.y < 0 or nb.x >= ZZGridView.GRID_COLS or nb.y >= ZZGridView.GRID_ROWS:
+			continue
+		var delta := grid.grid_to_world(nb.x, nb.y) - origin
+		delta.y = 0.0
+		if delta.length_squared() < 0.0001:
+			continue
+		var d := delta.normalized().dot(facing)
+		if d > best_dot:
+			best_dot = d
+			best_n = nb
+	# Need a clearly forward neighbor; otherwise treat as clear.
+	if best_n.x < 0 or best_dot < 0.35:
+		return false
+	return grid.has_wall(best_n.x, best_n.y)
+
+
+func _fly_projectile(from: Vector3, to: Vector3, tint: Color, preview: bool = false) -> void:
+	var bolt: Node3D = ProjectileBoltScript.new()
 	bolt.set_meta("zz_preview", preview)
 	bolt.set("tint", tint.lightened(0.35))
 	units_root.add_child(bolt)
-	bolt.global_position = from
-	bolt.queue_redraw()
+	var start := from
+	var end := to
+	if end.y < 0.3:
+		end.y = 1.0
+	if start.y < 0.3:
+		start.y = 1.1
+	bolt.global_position = start
 	var tw := units_root.create_tween()
-	tw.tween_property(bolt, "global_position", to, PROJECTILE_TIME).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_property(bolt, "global_position", end, PROJECTILE_TIME).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	await tw.finished
 	if is_instance_valid(bolt):
-		var flash := units_root.create_tween()
-		flash.tween_property(bolt, "modulate:a", 0.0, 0.08)
-		await flash.finished
-		if is_instance_valid(bolt):
-			bolt.queue_free()
+		bolt.queue_free()
 
 
 func _preview_shoot(target_id: String, outcome: Dictionary) -> void:
@@ -475,14 +640,17 @@ func _preview_shoot(target_id: String, outcome: Dictionary) -> void:
 		return
 	if not is_instance_valid(actor) or not is_instance_valid(target):
 		return
-	var impact: Vector2
+	var impact: Vector3
 	var hit_wall := bool(outcome.get("blocked", false))
 	if hit_wall:
 		var wc: Vector2i = outcome.get("wall", Vector2i.ZERO)
-		impact = grid.grid_to_world(wc.x, wc.y)
+		impact = grid.grid_to_world(wc.x, wc.y) + Vector3(0, 1.0, 0)
 	else:
-		impact = target.global_position
-	await _fly_projectile(actor.global_position, impact, actor.color, true)
+		impact = _unit_muzzle(target)
+	actor.face_world(impact)
+	actor.play_fire()
+	await get_tree().create_timer(0.12).timeout
+	await _fly_projectile(_unit_muzzle(actor), impact, actor.color, true)
 	if hit_wall:
 		await _wall_burst_at(impact)
 		return
@@ -490,9 +658,8 @@ func _preview_shoot(target_id: String, outcome: Dictionary) -> void:
 		await target.flash_hit()
 
 
-func _wall_burst_at(world_pos: Vector2) -> void:
-	var fx: Node2D = WallBurstScript.new()
-	fx.z_index = 35
+func _wall_burst_at(world_pos: Vector3) -> void:
+	var fx: Node3D = WallBurstScript.new()
 	fx.set_meta("zz_preview", true)
 	units_root.add_child(fx)
 	fx.global_position = world_pos
@@ -507,10 +674,22 @@ func _clear_preview_projectiles() -> void:
 			child.queue_free()
 
 
+func _apply_map_size_from_state(st: Dictionary) -> void:
+	if grid == null:
+		return
+	var cols := int(st.get("grid_w", st.get("grid", ZZGridView.GRID_COLS)))
+	var rows := int(st.get("grid_h", ZZGridView.GRID_ROWS))
+	# Legacy square payload: only `grid` set.
+	if not st.has("grid_h") and st.has("grid") and not st.has("grid_w"):
+		rows = cols
+	grid.set_map_size(cols, rows)
+
+
 func _apply_state(state: Variant, reset_queue: bool, snap_positions: bool) -> void:
 	if typeof(state) != TYPE_DICTIONARY:
 		return
 	var st: Dictionary = state
+	_apply_map_size_from_state(st)
 	if st.has("rules"):
 		_apply_combat_rules(st.get("rules", {}))
 	if st.has("turn"):
@@ -534,8 +713,7 @@ func _apply_state(state: Variant, reset_queue: bool, snap_positions: bool) -> vo
 		var uv: ZZUnitView = unit_nodes[pid]
 		var hp_val := int(pd.get("hp", 0))
 		if uv.is_dead or uv.is_dying:
-			uv.hp = hp_val
-			uv.queue_redraw()
+			uv.set_hp(hp_val, false)
 		else:
 			uv.set_hp(hp_val, snap_positions)
 		var gx := int(pd.get("x", 0))
@@ -562,6 +740,8 @@ func _apply_state(state: Variant, reset_queue: bool, snap_positions: bool) -> vo
 			hp_changed.emit(local_hp)
 			medkits_changed.emit(local_medkits)
 		idx += 1
+	if grid != null:
+		grid.clear_unit_outlines()
 
 
 func _rewind_local_to_turn_start() -> void:
@@ -594,6 +774,7 @@ func clear_battle_visuals() -> void:
 	if grid != null:
 		grid.set_highlight(Vector2i(-1, -1))
 		grid.clear_walls()
+		grid.clear_unit_outlines()
 	_clear_hover_path()
 	_clear_aim_previews()
 
@@ -719,7 +900,7 @@ func _path_to(g: Vector2i) -> Dictionary:
 	# budget_ap = remaining AP (green/gray); max_steps = 1.5 × max_ap pool.
 	return ZZPathfind.find_path(
 		local_pos, g, grid.walls_dict(), _occupied_keys_except_self(),
-		step, local_ap, ZZGridView.GRID_SIZE, _path_preview_steps()
+		step, local_ap, ZZGridView.GRID_COLS, ZZGridView.GRID_ROWS, _path_preview_steps()
 	)
 
 
@@ -833,9 +1014,10 @@ func _animate_local_path(cells: Array) -> void:
 	var uv: ZZUnitView = unit_nodes.get(your_id)
 	if uv == null or not is_instance_valid(uv):
 		return
-	for cell in cells:
-		var g: Vector2i = cell
-		await uv.animate_move_to(grid.grid_to_world(g.x, g.y))
+	for i in range(cells.size()):
+		var g: Vector2i = cells[i]
+		var stop_at_end := i == cells.size() - 1
+		await uv.animate_move_to(grid.grid_to_world(g.x, g.y), false, stop_at_end)
 
 
 func _queue_shoot(target_id: String) -> void:
@@ -982,6 +1164,6 @@ func _emit_history() -> void:
 				_flush_move_history(lines, move_run, move_end, move_ap)
 				move_run = 0
 				move_ap = 0
-				lines.append("Аптечка (+%d ХП) · %d ОД" % [medkit_heal, medkit_cost])
+				lines.append("Аптечка (+%d–%d ХП) · %d ОД" % [medkit_heal_min, medkit_heal_max, medkit_cost])
 	_flush_move_history(lines, move_run, move_end, move_ap)
 	history_changed.emit(lines)

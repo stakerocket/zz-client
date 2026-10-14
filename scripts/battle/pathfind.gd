@@ -15,7 +15,8 @@ static func find_path(
 	blocked: Dictionary,
 	step_ap: int,
 	budget_ap: int,
-	grid_size: int = 30,
+	grid_cols: int = 40,
+	grid_rows: int = 30,
 	max_steps: int = 24
 ) -> Dictionary:
 	var empty := {"path": [], "ap": 0, "affordable_steps": 0}
@@ -23,7 +24,7 @@ static func find_path(
 		return empty
 	if from == to:
 		return empty
-	if not _in_bounds(to, grid_size):
+	if not _in_bounds(to, grid_cols, grid_rows):
 		return empty
 	if walls.has(ZZLos.wall_key(to.x, to.y)):
 		return empty
@@ -54,7 +55,7 @@ static func find_path(
 		if cur_cost >= max_search_ap:
 			continue
 		for n in ZZLos.hex_neighbors(cur.x, cur.y):
-			if not _in_bounds(n, grid_size):
+			if not _in_bounds(n, grid_cols, grid_rows):
 				continue
 			var nk := ZZLos.wall_key(n.x, n.y)
 			if walls.has(nk):
@@ -94,5 +95,5 @@ static func find_path(
 	return {"path": path, "ap": total_ap, "affordable_steps": affordable}
 
 
-static func _in_bounds(c: Vector2i, grid_size: int) -> bool:
-	return c.x >= 0 and c.y >= 0 and c.x < grid_size and c.y < grid_size
+static func _in_bounds(c: Vector2i, grid_cols: int, grid_rows: int) -> bool:
+	return c.x >= 0 and c.y >= 0 and c.x < grid_cols and c.y < grid_rows

@@ -17,8 +17,9 @@ static var _rules: Dictionary = {
 	"move_ap_stand": 1,
 	"move_ap_sit": 2,
 	"posture_ap": 1,
-	"medkit_ap": 5,
-	"medkit_heal": 15,
+	"medkit_ap": 3,
+	"medkit_heal_min": 15,
+	"medkit_heal_max": 30,
 	"medkit_max": 5,
 	"shoot_ap": 4,
 	"weapon_range": 16,
@@ -205,8 +206,17 @@ static func evaluate_shot(
 				"soft": false,
 				"distance": dist,
 			}
-	if target_posture == "cover" and not obs.is_empty():
-		var first: Dictionary = obs[0]
+	# half/window next to shooter only (not next to target) do not count; rest of path as before.
+	var path_obs: Array = []
+	for o in obs:
+		var kind := str(o.kind)
+		var ox := int(o.x)
+		var oy := int(o.y)
+		if (kind == "half" or kind == "window") and is_hex_neighbor(ox, oy, x0, y0) and not is_hex_neighbor(ox, oy, x1, y1):
+			continue
+		path_obs.append(o)
+	if target_posture == "cover" and not path_obs.is_empty():
+		var first: Dictionary = path_obs[0]
 		return {
 			"blocked": true,
 			"chance": 0.0,
@@ -218,7 +228,7 @@ static func evaluate_shot(
 	var base := 1.0
 	var soft_wall := Vector2i(-1, -1)
 	var has_soft := false
-	for o in obs:
+	for o in path_obs:
 		var kind := str(o.kind)
 		if kind != "half" and kind != "window":
 			continue
