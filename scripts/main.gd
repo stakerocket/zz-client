@@ -11,7 +11,7 @@ const CAM_HEIGHT := 28.0
 ## Fallback if chat dock rect is not ready yet.
 const CHAT_BOTTOM_FRAC := 0.28
 ## Extra gap above the real chat/players strip so the map does not sit under it.
-const CHAT_PAD_PX := 20.0
+const CHAT_PAD_PX := 2.0
 
 ## Battle-only ortho camera. Lobby/login must NEVER make this current.
 @onready var battle_camera: Camera3D = $Camera3D
@@ -99,13 +99,12 @@ func _ensure_environment() -> void:
 	if _battle_environment == null:
 		var env := Environment.new()
 		env.background_mode = Environment.BG_COLOR
-		env.background_color = Color(0.03, 0.03, 0.035) # near-black void around hex map
+		env.background_color = Color(0, 0, 0) # pure black void around hex map
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 		env.ambient_light_color = Color(0.62, 0.58, 0.52)
 		env.ambient_light_energy = 0.48
-		env.fog_enabled = true
-		env.fog_light_color = Color(0.16, 0.16, 0.17)
-		env.fog_density = 0.012
+		# No fog — it washed the void to charcoal gray instead of black.
+		env.fog_enabled = false
 		env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 		_battle_environment = env
 	if has_node("WorldEnvironment"):
@@ -188,20 +187,32 @@ func _fit_camera_to_map() -> void:
 	_apply_camera_from_focus()
 
 
-func _chat_strip_top_y() -> float:
-	## Screen Y of the top edge of chat/players (works windowed + fullscreen).
+func _ui_to_viewport(ui_pos: Vector2) -> Vector2:
+	## Canvas Control → то же пространство, что Camera3D.project_ray / unproject.
+	## canvas_transform учитывает stretch canvas_items (окно и fullscreen).
+	var xf := get_viewport().get_canvas_transform()
+	return xf.affine_inverse() * ui_pos
+
+
+func _chat_band_top_y() -> float:
+	## Реальный верх полосы чата/игроков (get_global_rect), в coords камеры.
 	var vp := get_viewport().get_visible_rect()
-	var top := vp.position.y + vp.size.y
+	var top_ui := INF
 	var found := false
 	if ui != null and ui.chat_dock != null and ui.chat_dock.visible:
-		top = minf(top, ui.chat_dock.get_global_rect().position.y)
+		top_ui = minf(top_ui, ui.chat_dock.get_global_rect().position.y)
 		found = true
 	if ui != null and ui.bottom_bar != null and ui.bottom_bar.visible:
-		top = minf(top, ui.bottom_bar.get_global_rect().position.y)
+		top_ui = minf(top_ui, ui.bottom_bar.get_global_rect().position.y)
 		found = true
 	if not found:
 		return vp.position.y + vp.size.y * (1.0 - CHAT_BOTTOM_FRAC)
-	return top - CHAT_PAD_PX
+	return _ui_to_viewport(Vector2(0.0, top_ui)).y
+
+
+func _chat_strip_top_y() -> float:
+	## Низ playable: верх чата минус небольшой зазор (карта не под UI).
+	return _chat_band_top_y() - CHAT_PAD_PX
 
 
 func _chat_bottom_frac() -> float:
@@ -317,65 +328,39 @@ func _ground_at_screen(screen_pos: Vector2) -> Vector3:
 	return from + dir * t
 
 
-func _playable_screen_rect() -> Rect2:
-	var vp := get_viewport().get_visible_rect()
-	var top := vp.position.y
-	var bot := _chat_strip_top_y()
-	return Rect2(vp.position.x, top, vp.size.x, maxf(1.0, bot - top))
-
-
-func _view_x_span_at_mid() -> Vector2:
-	## World X at left/right of playable area (mid height) — no oblique AABB inflate.
-	var r := _playable_screen_rect()
-	var mid_y := r.position.y + r.size.y * 0.5
-	var a := _ground_at_screen(Vector2(r.position.x, mid_y))
-	var b := _ground_at_screen(Vector2(r.position.x + r.size.x, mid_y))
-	return Vector2(minf(a.x, b.x), maxf(a.x, b.x))
-
-
-func _view_z_span_at_mid() -> Vector2:
-	## World Z at top/bottom of playable area (mid width) — pan uses this, not corner AABB.
-	var r := _playable_screen_rect()
-	var mid_x := r.position.x + r.size.x * 0.5
-	var a := _ground_at_screen(Vector2(mid_x, r.position.y))
-	var b := _ground_at_screen(Vector2(mid_x, r.position.y + r.size.y))
-	return Vector2(minf(a.z, b.z), maxf(a.z, b.z))
+func _map_dirt_south_z() -> float:
+	## Южный край коричневой земли (как на экране), не раздутый bounds.
+	var c := grid.map_center()
+	var e := grid.map_extents()
+	return c.z + e.z * 1.01 # half of plane.size = ext * 2.02
 
 
 func _clamp_focus() -> void:
-	## Flush map to playable edges. Vertical pan free when map taller than view.
-	## Zoom is never changed here.
+	## Единственный упор (как в рабочем фиксе):
+	## сдвиг вниз поднимает карту — нельзя оставлять дыру больше CHAT_PAD над чатом.
+	## Вверх / в стороны свободно. Зум не трогаем.
+	## Считаем в мире по земле: луч через линию «чат − pad» vs юг грязи.
 	_focus.y = 0.0
-	var map_r := grid.map_xz_bounds()
-	var map_min := map_r.position
-	var map_max := map_r.position + map_r.size
-	for _i in 6:
+	var vp := get_viewport().get_visible_rect()
+	var mid_x := vp.position.x + vp.size.x * 0.5
+	var limit_screen_y := _chat_strip_top_y() # верх чата − pad (уже в coords камеры)
+	var basis := Basis.from_euler(Vector3(deg_to_rad(CAM_PITCH_DEG), deg_to_rad(CAM_YAW_DEG), 0.0))
+	var screen_up := basis.y
+	screen_up.y = 0.0
+	if screen_up.length_squared() < 0.0001:
+		return
+	screen_up = screen_up.normalized()
+	var map_south_z := _map_dirt_south_z()
+	for _i in 10:
 		_apply_camera_from_focus()
-		var xs := _view_x_span_at_mid()
-		var zs := _view_z_span_at_mid()
-		var dx := 0.0
-		var dz := 0.0
-		var view_w := xs.y - xs.x
-		var view_h := zs.y - zs.x
-		if view_w >= map_r.size.x - 0.05:
-			dx = (map_min.x + map_max.x) * 0.5 - (xs.x + xs.y) * 0.5
-		else:
-			if xs.y > map_max.x:
-				dx -= xs.y - map_max.x
-			if xs.x < map_min.x:
-				dx += map_min.x - xs.x
-		# Mid-line Z (not corner AABB) so tall maps can pan to the north edge.
-		if view_h >= map_r.size.y - 0.05:
-			dz = map_max.y - zs.y # pin south to chat line
-		else:
-			if zs.y > map_max.y:
-				dz -= zs.y - map_max.y
-			if zs.x < map_min.y:
-				dz += map_min.y - zs.x
-		_focus.x += dx
-		_focus.z += dz
-		if absf(dx) < 0.001 and absf(dz) < 0.001:
+		var z_at_limit := _ground_at_screen(Vector2(mid_x, limit_screen_y)).z
+		# z_at_limit > map_south_z → линия над чатом южнее края карты → дыра слишком большая.
+		var excess_z := z_at_limit - map_south_z
+		if excess_z <= 0.02:
 			break
+		# Взгляд на север → карта вниз по экрану → дыра схлопывается.
+		_focus += screen_up * excess_z
+		_focus.y = 0.0
 	_focus.y = 0.0
 
 

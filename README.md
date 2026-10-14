@@ -17,3 +17,5 @@
 - `USE_PROD = true` → `ws://103.167.235.247:8080/ws` (прод)
 
 Протокол и запуск сервера — [server/README.md](../server/README.md). Архитектура сервера — [server/docs/ARCHITECTURE.md](../server/docs/ARCHITECTURE.md).
+
+Координаты 2D UI vs 3D карта (упор камеры к чату) — [docs/CAMERA_UI_COORDS.md](docs/CAMERA_UI_COORDS.md).

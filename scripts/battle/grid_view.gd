@@ -504,8 +504,8 @@ func _rebuild_ground_bed() -> void:
 	var center := map_center()
 	var ext := map_extents()
 	var plane := PlaneMesh.new()
-	# Keep dirt close to the hex field so void under the chat stays clear gray.
-	plane.size = Vector2(ext.x * 2.05, ext.z * 2.05)
+	# Плотно к полю: под чатом чёрный/серый void, не коричневый пол под UI.
+	plane.size = Vector2(ext.x * 2.02, ext.z * 2.02)
 	_ground.mesh = plane
 	_ground.material_override = _mat_ground
 	_ground.position = Vector3(center.x, 0.0, center.z)
