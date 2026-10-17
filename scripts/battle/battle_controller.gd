@@ -13,6 +13,7 @@ var medkit_heal_max: int = 0
 var medkit_max: int = 0
 var reload_cost: int = 0
 var switch_weapon_cost: int = 1
+var inventory_ap_cost: int = 2
 ## Max AP/HP from player snapshot or ZZLos.compute_* after rules.
 var max_ap: int = 0
 var max_hp: int = 0
@@ -35,6 +36,7 @@ signal room_players_changed(nicks: Array)
 signal chat_received(nick: String, text: String, channel: String)
 signal rules_changed
 signal inventory_state_received(data: Dictionary)
+signal battle_inventory_opened(data: Dictionary)
 
 var ws: ZZWSClient
 var grid: ZZGridView
@@ -42,6 +44,10 @@ var units_root: Node3D
 
 var local_nick: String = ""
 var your_id: String = ""
+## Last login/connect failure text for the UI (empty if none).
+var last_connect_error: String = ""
+var _join_waiting: bool = false
+var _join_ok: bool = false
 var input_locked: bool = true
 var local_ap: int = 0
 var local_hp: int = 0
@@ -122,11 +128,27 @@ func _ensure_ws() -> bool:
 
 func connect_and_join_lobby(nick: String) -> bool:
 	if nick == "":
+		last_connect_error = "Введите ник"
 		return false
 	local_nick = nick
+	last_connect_error = ""
 	if not await _ensure_ws():
+		last_connect_error = "Сервер недоступен"
 		return false
+	_join_waiting = true
+	_join_ok = false
 	ws.send_dict(ZZProtocol.join_lobby(nick))
+	var tries := 0
+	while _join_waiting and tries < 50:
+		await get_tree().create_timer(0.1).timeout
+		tries += 1
+	var waiting := _join_waiting
+	_join_waiting = false
+	if waiting or not _join_ok:
+		if last_connect_error == "":
+			last_connect_error = "Сервер недоступен"
+		ws.disconnect_from_server()
+		return false
 	return true
 
 
@@ -146,6 +168,40 @@ func request_inventory_unequip(slot: String) -> void:
 	if not ws.is_open() or in_battle or slot == "":
 		return
 	ws.send_dict(ZZProtocol.inventory_unequip(slot))
+
+
+## Spend inventory_ap_cost and open inventory overlay from local battle snapshot.
+func request_inventory_open() -> void:
+	if input_locked or not in_battle or _playing_events:
+		return
+	if local_ap < inventory_ap_cost:
+		return
+	action_queue.append(ZZProtocol.inventory_action())
+	local_ap -= inventory_ap_cost
+	ap_changed.emit(local_ap)
+	_emit_history()
+	battle_inventory_opened.emit(_local_inventory_snapshot())
+
+
+func _local_inventory_snapshot() -> Dictionary:
+	var pd: Dictionary = players.get(your_id, {}) if your_id != "" else {}
+	var inv: Variant = pd.get("inventory", local_inventory)
+	if typeof(inv) != TYPE_ARRAY:
+		inv = local_inventory
+	var eq: Variant = pd.get("equipped", {})
+	if typeof(eq) != TYPE_DICTIONARY:
+		eq = {}
+	var q: Variant = pd.get("quick", local_quick)
+	if typeof(q) != TYPE_ARRAY:
+		q = local_quick
+	return {
+		"inventory": inv,
+		"equipped": eq,
+		"quick": q,
+		"inventory_weight": float(pd.get("inventory_weight", 0.0)),
+		"carry_weight": float(pd.get("carry_weight", 50.0)),
+		"overweight": bool(pd.get("overweight", false)),
+	}
 
 
 func send_chat(text: String, channel: String = "lobby") -> void:
@@ -331,6 +387,9 @@ func _on_message(data: Dictionary) -> void:
 			ZZLos.apply_item_catalog(data.get("item_catalog", {}))
 			rules_changed.emit()
 			room_players_changed.emit(data.get("players", []))
+			if _join_waiting:
+				_join_ok = true
+				_join_waiting = false
 		"inventory_state":
 			_apply_quick_from_payload(data)
 			inventory_state_received.emit(data)
@@ -354,7 +413,13 @@ func _on_message(data: Dictionary) -> void:
 			_resolve_queue.append({"kind": "state", "data": data})
 		"battle_end":
 			_resolve_queue.append({"kind": "end", "data": data})
-		"error", "pong":
+		"error":
+			var err_msg := str(data.get("message", "Ошибка сервера"))
+			if _join_waiting:
+				_join_ok = false
+				_join_waiting = false
+				last_connect_error = err_msg
+		"pong":
 			pass
 		_:
 			pass
@@ -444,6 +509,9 @@ func _apply_combat_rules(rules: Variant) -> void:
 	switch_weapon_cost = ZZLos.rule_i("switch_weapon_ap")
 	if switch_weapon_cost <= 0:
 		switch_weapon_cost = 1
+	inventory_ap_cost = ZZLos.rule_i("inventory_ap")
+	if inventory_ap_cost <= 0:
+		inventory_ap_cost = 2
 	var mag := ZZLos.rule_i("weapon_mag_size")
 	if mag > 0:
 		local_mag_size = mag
@@ -754,6 +822,8 @@ func _play_one_event(e: Dictionary, groups: Array = [], gi: int = 0) -> void:
 			await _play_reload_event(e)
 		"switch_weapon":
 			await _play_switch_weapon_event(e)
+		"inventory":
+			pass
 		"shoot":
 			await _play_shoot_event(e)
 		_:
@@ -1550,6 +1620,9 @@ func _recompute_local_from_queue() -> void:
 				local_ap -= switch_weapon_cost
 				_apply_local_switch(int(act.get("weapon_index", 0)))
 				run_streak = 0
+			"inventory":
+				local_ap -= inventory_ap_cost
+				run_streak = 0
 	if unit_nodes.has(your_id):
 		var uv2: ZZUnitView = unit_nodes[your_id]
 		if uv2 != null and is_instance_valid(uv2) and not uv2.is_dead:
@@ -1665,5 +1738,11 @@ func _emit_history() -> void:
 						var def := ZZLos.item_def(wid)
 						wname = str(def.get("name", wid))
 				lines.append("Смена: %s · %d ОД" % [wname, switch_weapon_cost])
+			"inventory":
+				_flush_move_history(lines, move_run, move_end, move_ap)
+				move_run = 0
+				move_ap = 0
+				run_streak = 0
+				lines.append("Инвентарь · %d ОД" % inventory_ap_cost)
 	_flush_move_history(lines, move_run, move_end, move_ap)
 	history_changed.emit(lines)

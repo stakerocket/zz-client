@@ -3,10 +3,9 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://minvuy1hacfj"
-path.bptc="res://.godot/imported/rider_soldier_action_figure_3d_model_normal.jpg-e79780c903624ad359161ab5a8e050db.bptc.ctex"
+path="res://.godot/imported/rider_soldier_action_figure_3d_model_normal.jpg-e79780c903624ad359161ab5a8e050db.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
-"vram_texture": true
+"vram_texture": false
 }
 generator_parameters={
 "md5": "3f4e69109e9addd4e1a2f462a27c957b"
@@ -15,11 +14,11 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/units/rider_soldier_action_figure_3d_model_normal.jpg"
-dest_files=["res://.godot/imported/rider_soldier_action_figure_3d_model_normal.jpg-e79780c903624ad359161ab5a8e050db.bptc.ctex"]
+dest_files=["res://.godot/imported/rider_soldier_action_figure_3d_model_normal.jpg-e79780c903624ad359161ab5a8e050db.ctex"]
 
 [params]
 
-compress/mode=2
+compress/mode=3
 compress/high_quality=true
 compress/lossy_quality=0.9
 compress/uastc_level=0

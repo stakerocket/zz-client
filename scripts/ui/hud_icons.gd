@@ -106,7 +106,7 @@ static func medkit(sz: int = 64) -> Texture2D:
 
 
 static func rifle(w: int = 120, h: int = 40) -> Texture2D:
-	var mock := ZZInventoryIcons.tex("kar98")
+	var mock := ZZInventoryIcons.tex_tight("kar98")
 	if mock != null:
 		return mock
 	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
@@ -119,7 +119,7 @@ static func rifle(w: int = 120, h: int = 40) -> Texture2D:
 
 
 static func pistol(w: int = 80, h: int = 40) -> Texture2D:
-	var mock := ZZInventoryIcons.tex("glock17")
+	var mock := ZZInventoryIcons.tex_tight("glock17")
 	if mock != null:
 		return mock
 	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
@@ -191,6 +191,53 @@ static func vest(sz: int = 48) -> Texture2D:
 	_rect(img, sz * 0.36, sz * 0.12, sz * 0.10, sz * 0.14, c)
 	_rect(img, sz * 0.54, sz * 0.12, sz * 0.10, sz * 0.14, c)
 	return _tex(img)
+
+
+static func inventory(sz: int = 36) -> Texture2D:
+	## 3D-rendered backpack (assets/hud/inventory_bag.png), cropped for HUD.
+	var side := maxi(16, sz)
+	var key := "inv_bag_3d@%d" % side
+	if _cache.has(key):
+		return _cache[key]
+	var img := _load_hud_image(HUD_DIR + "inventory_bag.png")
+	if img != null:
+		img.convert(Image.FORMAT_RGBA8)
+		_knockout_near_black(img, 0.08)
+		var used := img.get_used_rect()
+		if used.size.x >= 4 and used.size.y >= 4:
+			var pad := maxi(1, int(maxi(used.size.x, used.size.y) * 0.03))
+			used.position.x = maxi(0, used.position.x - pad)
+			used.position.y = maxi(0, used.position.y - pad)
+			used.end.x = mini(img.get_width(), used.end.x + pad)
+			used.end.y = mini(img.get_height(), used.end.y + pad)
+			img = img.get_region(used)
+		img.resize(side, side, Image.INTERPOLATE_LANCZOS)
+		var out := ImageTexture.create_from_image(img)
+		_cache[key] = out
+		return out
+	## Fallback silhouette if asset missing.
+	var fb_key := "inv_pack_fb@%d" % side
+	if _cache.has(fb_key):
+		return _cache[fb_key]
+	var fb := _blank(side)
+	var c := _ink()
+	_rect(fb, side * 0.26, side * 0.30, side * 0.48, side * 0.52, c)
+	_rect(fb, side * 0.28, side * 0.20, side * 0.44, side * 0.16, c)
+	_line(fb, side * 0.28, side * 0.34, side * 0.14, side * 0.58, maxi(2, int(side * 0.10)), c)
+	_line(fb, side * 0.72, side * 0.34, side * 0.86, side * 0.58, maxi(2, int(side * 0.10)), c)
+	var fb_tex := _tex(fb)
+	_cache[fb_key] = fb_tex
+	return fb_tex
+
+
+static func _knockout_near_black(img: Image, thresh: float) -> void:
+	var w := img.get_width()
+	var h := img.get_height()
+	for y in range(h):
+		for x in range(w):
+			var p := img.get_pixel(x, y)
+			if p.r <= thresh and p.g <= thresh and p.b <= thresh:
+				img.set_pixel(x, y, Color(0, 0, 0, 0))
 
 
 static func undo(sz: int = 36) -> Texture2D:

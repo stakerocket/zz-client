@@ -361,7 +361,12 @@ static func evaluate_shot(
 	if not has_soft:
 		defense = _open_defense(target_posture)
 
-	var pose := rule_f("hit_pose_bonus_sit") if shooter_posture == "sit" else rule_f("hit_pose_bonus_stand")
+	var pose := rule_f("hit_pose_bonus_stand")
+	match shooter_posture:
+		"sit":
+			pose = rule_f("hit_pose_bonus_sit")
+		"run":
+			pose = rule_f("hit_pose_bonus_run")
 	var mark := float(maxi(0, shooter_marksmanship)) * rule_f("hit_per_accuracy_stat")
 	var dodge := float(maxi(0, target_agility)) * rule_f("dodge_per_agility")
 	if target_posture == "run":
@@ -402,5 +407,5 @@ static func _soft_defense(target_posture: String, kind: String) -> float:
 
 
 static func can_shoot_from(posture: String) -> bool:
-	# Match server: run is reposition-only.
-	return posture == "stand" or posture == "sit"
+	# Match server: cover blocks; run allowed with hit_pose_bonus_run penalty.
+	return posture == "stand" or posture == "sit" or posture == "run"

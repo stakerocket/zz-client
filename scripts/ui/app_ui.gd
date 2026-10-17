@@ -13,6 +13,7 @@ signal weapon_slot_pressed(slot_index: int)
 signal chat_submitted(text: String, channel: String)
 signal return_to_lobby_pressed
 signal inventory_open_pressed
+signal battle_inventory_pressed
 signal inventory_equip_requested(item_id: String, slot: String)
 signal inventory_unequip_requested(slot: String)
 
@@ -21,7 +22,6 @@ const TAB_BATTLE := 1
 const CHAT_W := 420.0
 const CHAT_H := 150.0
 const CHAT_COLLAPSED_H := 36.0
-const PLAN_W := 160.0
 const SOCIAL_EDGE := 8.0
 const CHAT_FADE_IDLE_SEC := 7.0
 const CHAT_FADE_DUR := 0.45
@@ -58,7 +58,6 @@ const ACTION_DIM := Color(1, 1, 1, 0.45)
 @onready var lobby_screen: Control = $LobbyScreen
 @onready var battle_hud: Control = $BattleHud
 @onready var chat_dock: PanelContainer = $ChatDock
-@onready var plan_dock: PanelContainer = $PlanDock
 
 @onready var nick_edit: LineEdit = $LoginScreen/Center/Panel/Margin/InnerCenter/VBox/NickEdit
 @onready var continue_btn: Button = $LoginScreen/Center/Panel/Margin/InnerCenter/VBox/ContinueBtn
@@ -97,6 +96,7 @@ var inventory_ui: ZZInventoryUI
 @onready var sit_btn: Button = $BattleHud/CharDock/VBox/ActionRow/QuickGrid/SitBtn
 @onready var run_btn: Button = $BattleHud/CharDock/VBox/ActionRow/QuickGrid/RunBtn
 @onready var cover_btn: Button = $BattleHud/CharDock/VBox/ActionRow/QuickGrid/CoverBtn
+@onready var battle_inv_btn: Button = $BattleHud/CharDock/VBox/TopRow/BattleInvBtn
 @onready var undo_btn: Button = $BattleHud/CharDock/VBox/TopRow/UndoBtn
 @onready var quick_bar: HBoxContainer = $BattleHud/CharDock/VBox/TopRow/QuickBar
 @onready var reload_btn: Button = $BattleHud/CharDock/VBox/ActionRow/WeaponBtn
@@ -106,7 +106,6 @@ var inventory_ui: ZZInventoryUI
 @onready var shot_cost_label: Label = $BattleHud/CharDock/VBox/ActionRow/WeaponBtn/ShotCostLabel
 @onready var ammo_col: HBoxContainer = $BattleHud/CharDock/VBox/ActionRow/WeaponBtn/AmmoRow/AmmoCol
 @onready var ammo_count_label: Label = $BattleHud/CharDock/VBox/ActionRow/WeaponBtn/AmmoRow/AmmoCountLabel
-@onready var history_list: ItemList = $PlanDock/Margin/VBox/HistoryList
 @onready var battle_hp_bar: ProgressBar = $BattleHud/CharDock/VBox/TopRow/VitalCol/HPRow/HPBar
 @onready var battle_hp_value: Label = $BattleHud/CharDock/VBox/TopRow/VitalCol/HPRow/HPValue
 @onready var battle_ap_bar: ProgressBar = $BattleHud/CharDock/VBox/TopRow/VitalCol/APRow/APBar
@@ -126,6 +125,8 @@ func _ready() -> void:
 	find_btn.pressed.connect(func(): find_match_pressed.emit())
 	if inventory_btn != null:
 		inventory_btn.pressed.connect(_on_inventory_btn)
+	if battle_inv_btn != null:
+		battle_inv_btn.pressed.connect(_on_battle_inventory_btn)
 	end_btn.pressed.connect(func(): end_turn_pressed.emit())
 	undo_btn.pressed.connect(func(): undo_pressed.emit())
 	stand_btn.pressed.connect(func(): posture_pressed.emit("stand"))
@@ -133,6 +134,7 @@ func _ready() -> void:
 	run_btn.pressed.connect(func(): posture_pressed.emit("run"))
 	cover_btn.pressed.connect(func(): posture_pressed.emit("cover"))
 	_bind_quick_bar()
+	_wire_tip_host(reload_btn)
 	reload_btn.pressed.connect(func(): weapon_slot_pressed.emit(0))
 	_ensure_weapon2_btn()
 	var top_row := char_dock.get_node_or_null("VBox/TopRow") as Control if char_dock != null else null
@@ -147,18 +149,18 @@ func _ready() -> void:
 	end_btn.disabled = true
 	undo_btn.disabled = true
 	result_overlay.visible = false
+	_kill_default_tooltip_panel()
 	_apply_hud_icons()
+	_setup_posture_tips()
+	_setup_battle_inv_tip()
 	_ensure_inventory_ui()
 	# Keep social UI above full-screen lobby/battle layers.
 	chat_dock.z_index = 100
-	plan_dock.z_index = 100
 	move_child(chat_dock, get_child_count() - 1)
-	move_child(plan_dock, get_child_count() - 1)
 	if inventory_ui != null:
 		move_child(inventory_ui, get_child_count() - 1)
 	lobby_screen.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	chat_dock.mouse_filter = Control.MOUSE_FILTER_STOP
-	plan_dock.mouse_filter = Control.MOUSE_FILTER_STOP
 	_setup_chat_fade_timer()
 	_make_chat_tabs_transparent()
 	show_login()
@@ -187,6 +189,20 @@ func _on_inventory_btn() -> void:
 		return
 	inventory_ui.open_for(player_nick)
 	inventory_open_pressed.emit()
+
+
+func _on_battle_inventory_btn() -> void:
+	if inventory_ui != null and inventory_ui.visible:
+		inventory_ui.close()
+		return
+	battle_inventory_pressed.emit()
+
+
+func open_battle_inventory(data: Dictionary) -> void:
+	if inventory_ui == null:
+		_ensure_inventory_ui()
+	inventory_ui.apply_state(data)
+	inventory_ui.open_for(player_nick)
 
 
 func apply_inventory_state(data: Dictionary) -> void:
@@ -247,15 +263,30 @@ func _on_chat_dock_gui_input(event: InputEvent) -> void:
 		_reveal_chat_history()
 
 
-func show_login() -> void:
+func show_login(clear_error: bool = true) -> void:
 	login_screen.visible = true
 	lobby_screen.visible = false
 	battle_hud.visible = false
 	hide_inventory()
 	_set_social_visible(false)
 	_in_battle_ui = false
-	login_error.text = ""
+	if clear_error:
+		login_error.text = ""
+	continue_btn.disabled = false
 	nick_edit.grab_focus()
+
+
+func set_login_error(msg: String) -> void:
+	login_error.add_theme_color_override("font_color", Color(0.92, 0.42, 0.38, 1))
+	login_error.text = msg
+	continue_btn.disabled = false
+	nick_edit.grab_focus()
+
+
+func _set_login_status(msg: String) -> void:
+	## Neutral status (connecting) — gray, not error red.
+	login_error.add_theme_color_override("font_color", Color(0.62, 0.62, 0.64, 1))
+	login_error.text = msg
 
 
 func show_lobby() -> void:
@@ -399,6 +430,7 @@ func set_ap(value: int) -> void:
 	if battle_ap_value != null:
 		battle_ap_value.text = str(ap)
 		battle_ap_value.tooltip_text = "%d / %d" % [ap, _max_ap]
+	_refresh_battle_inv_affordance(ap)
 
 
 func set_hp(value: int) -> void:
@@ -416,26 +448,14 @@ func set_posture(posture: String) -> void:
 	_refresh_posture_highlight()
 
 
-func set_history(lines: Array) -> void:
-	if history_list == null:
-		return
-	history_list.clear()
-	for line in lines:
-		var idx := history_list.add_item(str(line))
-		history_list.set_item_selectable(idx, false)
-	if not lines.is_empty():
-		history_list.select(lines.size() - 1)
-		history_list.ensure_current_is_visible()
-	if plan_dock != null and _in_battle_ui:
-		plan_dock.visible = true
-
-
 func set_end_enabled(enabled: bool) -> void:
 	end_btn.disabled = not enabled
 	stand_btn.disabled = not enabled
 	sit_btn.disabled = not enabled
 	run_btn.disabled = not enabled
 	cover_btn.disabled = not enabled
+	if battle_inv_btn != null:
+		battle_inv_btn.disabled = not enabled
 
 
 func set_medkit_enabled(enabled: bool) -> void:
@@ -504,11 +524,15 @@ func set_quick_slots(slots: Array, counts: Array = [], heal_min: int = 15, heal_
 			continue
 		var icon := btn.get_node_or_null("Icon") as TextureRect
 		var count_lbl := btn.get_node_or_null("CountLabel") as Label
+		var tip := _wire_tip_host(btn)
 		if id == "":
 			if icon != null:
 				icon.texture = null
 			if count_lbl != null:
 				count_lbl.text = ""
+			if tip != null:
+				tip.tip_item_id = ""
+				tip.tip_extra = []
 			btn.tooltip_text = ""
 			btn.modulate = ACTION_DIM
 			continue
@@ -521,12 +545,11 @@ func set_quick_slots(slots: Array, counts: Array = [], heal_min: int = 15, heal_
 			qty = _medkit_count
 		if count_lbl != null:
 			count_lbl.text = ("x%d" % qty) if qty > 1 else ("" if qty <= 0 else "")
-		if _item_type_of(id) == "medkit":
-			btn.tooltip_text = "%s +%d–%d ХП / %d ОД" % [
-				str(ZZLos.item_def(id).get("name", "Аптечка")), heal_min, heal_max, medkit_ap
-			]
-		else:
-			btn.tooltip_text = str(ZZLos.item_def(id).get("name", id))
+		if tip != null:
+			tip.tip_item_id = id
+			tip.tip_qty = maxi(qty, 1)
+			tip.tip_extra = []
+		btn.tooltip_text = " "  # non-empty → custom tip
 	_refresh_quick_medkit_meta(heal_min, heal_max, medkit_ap)
 
 
@@ -543,9 +566,12 @@ func _refresh_quick_medkit_meta(heal_min: int, heal_max: int, ap_cost: int) -> v
 			count_lbl.text = "x%d" % _medkit_count
 		elif count_lbl != null and _medkit_count <= 0:
 			count_lbl.text = ""
-		btn.tooltip_text = "%s +%d–%d ХП / %d ОД" % [
-			str(ZZLos.item_def(id).get("name", "Аптечка")), heal_min, heal_max, ap_cost
-		]
+		var tip := _wire_tip_host(btn)
+		if tip != null:
+			tip.tip_item_id = id
+			tip.tip_qty = maxi(_medkit_count, 1)
+			tip.tip_extra = []
+		btn.tooltip_text = " "
 
 
 func _item_type_of(item_id: String) -> String:
@@ -591,7 +617,120 @@ func _ensure_quick_btns() -> void:
 	for b in _quick_btns:
 		if b == null:
 			continue
+		_wire_tip_host(b)
 		_style_quick_qty_badge(b.get_node_or_null("CountLabel") as Label)
+
+
+func _kill_default_tooltip_panel() -> void:
+	## Same as inventory: empty TooltipPanel so custom cards have no halo.
+	if char_dock == null:
+		return
+	var tip_theme := Theme.new()
+	tip_theme.set_stylebox("panel", "TooltipPanel", StyleBoxEmpty.new())
+	char_dock.theme = tip_theme
+
+
+func _wire_tip_host(btn: Button) -> ZZTipHostBtn:
+	if btn == null:
+		return null
+	if btn is ZZTipHostBtn:
+		return btn as ZZTipHostBtn
+	btn.set_script(preload("res://scripts/ui/tip_host_btn.gd"))
+	return btn as ZZTipHostBtn
+
+
+func _setup_posture_tips() -> void:
+	var ap := ZZLos.rule_i("posture_ap")
+	if ap <= 0:
+		ap = 1
+	var dodge_run := int(round(ZZLos.rule_f("hit_pose_dodge_run") * 100.0))
+	if dodge_run <= 0:
+		dodge_run = 25
+	## Cover open defense shown as уклонение.
+	var dodge_cover := int(round(ZZLos.rule_f("def_cover_open") * 100.0))
+	if dodge_cover <= 0:
+		dodge_cover = 60
+	var sit_acc := int(round(ZZLos.rule_f("hit_pose_bonus_sit") * 100.0))
+	if sit_acc <= 0:
+		sit_acc = 15
+	var sit_dodge := int(round(ZZLos.rule_f("def_sit_open") * 100.0))
+	if sit_dodge <= 0:
+		sit_dodge = 15
+	var run_acc := int(round(ZZLos.rule_f("hit_pose_bonus_run") * 100.0))
+	if run_acc == 0:
+		run_acc = -20
+	_set_posture_tip(stand_btn, "Стоя", [
+		["Смена", "%d ОД" % ap],
+		["Движение", "обычно"],
+	])
+	_set_posture_tip(sit_btn, "Сидя", [
+		["Смена", "%d ОД" % ap],
+		["Уклонение", "%+d" % sit_dodge],
+		["Меткость", "%+d" % sit_acc],
+		["Движение", "медленнее"],
+	])
+	_set_posture_tip(run_btn, "Бег", [
+		["Смена", "%d ОД" % ap],
+		["Уклонение", "%+d" % dodge_run],
+		["Меткость", "%+d" % run_acc],
+		["Движение", "быстрее"],
+	])
+	_set_posture_tip(cover_btn, "Укрыться", [
+		["Смена", "%d ОД" % ap],
+		["Уклонение", "%+d" % dodge_cover],
+		["Движение", "нет"],
+	])
+	_clear_ap_badge(stand_btn)
+	_clear_ap_badge(sit_btn)
+	_clear_ap_badge(run_btn)
+	_clear_ap_badge(cover_btn)
+
+
+func _set_posture_tip(btn: Button, title: String, rows: Array) -> void:
+	_set_simple_tip(btn, title, "Стойка", rows)
+
+
+func _set_simple_tip(btn: Button, title: String, subtitle: String, rows: Array) -> void:
+	var tip := _wire_tip_host(btn)
+	if tip == null:
+		return
+	tip.tip_item_id = ""
+	tip.tip_title = title
+	tip.tip_subtitle = subtitle
+	tip.tip_extra = rows
+	btn.tooltip_text = " "
+
+
+func _clear_ap_badge(btn: Button) -> void:
+	if btn == null:
+		return
+	var lbl := btn.get_node_or_null("ApCost")
+	if lbl != null:
+		lbl.queue_free()
+
+
+func _setup_battle_inv_tip() -> void:
+	if battle_inv_btn == null:
+		return
+	var ap := ZZLos.rule_i("inventory_ap")
+	if ap <= 0:
+		ap = 2
+	_set_simple_tip(battle_inv_btn, "Инвентарь", "", [
+		["Открыть", "%d ОД" % ap],
+	])
+	_clear_ap_badge(battle_inv_btn)
+
+
+func _refresh_battle_inv_affordance(ap: int) -> void:
+	if battle_inv_btn == null:
+		return
+	var cost := ZZLos.rule_i("inventory_ap")
+	if cost <= 0:
+		cost = 2
+	## Keep clickable when open (close is free); dim only if can't afford open.
+	var open := inventory_ui != null and inventory_ui.visible
+	var look_ok := open or ap >= cost
+	battle_inv_btn.modulate = Color.WHITE if look_ok else ACTION_DIM
 
 
 func _style_quick_qty_badge(lbl: Label) -> void:
@@ -648,13 +787,16 @@ func _apply_hud_icons() -> void:
 	run_btn.icon = ZZHudIcons.posture_run(32)
 	cover_btn.icon = ZZHudIcons.posture_cover(32)
 	undo_btn.icon = ZZHudIcons.undo(22)
+	if battle_inv_btn != null:
+		battle_inv_btn.icon = ZZHudIcons.inventory(24)
+		battle_inv_btn.expand_icon = true
 	stand_btn.expand_icon = true
 	sit_btn.expand_icon = true
 	run_btn.expand_icon = true
 	cover_btn.expand_icon = true
 	undo_btn.expand_icon = true
 	if rifle_icon != null:
-		rifle_icon.texture = ZZHudIcons.rifle(80, 24)
+		rifle_icon.texture = ZZHudIcons.rifle(160, 48)
 	if reload_icon != null:
 		reload_icon.texture = ZZHudIcons.icon_reload(14)
 	_apply_weapon_slot_visuals()
@@ -668,12 +810,13 @@ func _ensure_weapon2_btn() -> void:
 	_weapon2_btn = reload_btn.duplicate() as Button
 	_weapon2_btn.name = "WeaponBtn2"
 	_weapon2_btn.size_flags_horizontal = 0
+	_wire_tip_host(_weapon2_btn)
 	reload_btn.get_parent().add_child(_weapon2_btn)
 	reload_btn.get_parent().move_child(_weapon2_btn, reload_btn.get_index() + 1)
 	_weapon2_btn.pressed.connect(func(): weapon_slot_pressed.emit(1))
 	var icon2: TextureRect = _weapon2_btn.get_node_or_null("RifleIcon")
 	if icon2 != null:
-		icon2.texture = ZZHudIcons.pistol(64, 24)
+		icon2.texture = ZZHudIcons.pistol(120, 40)
 	var reload_icon2: TextureRect = _weapon2_btn.get_node_or_null("ReloadRow/ReloadIcon")
 	if reload_icon2 != null:
 		reload_icon2.texture = ZZHudIcons.icon_reload(14)
@@ -688,43 +831,40 @@ func _apply_weapon_slot_visuals() -> void:
 
 
 func _sync_weapon_card_widths() -> void:
-	## Weapon1 right edge = Quick1 (2nd slot); Weapon2 right edge = Undo.
-	## No empty strip past undo; vitals stay wider on the left.
+	## Equal-width weapon cards filling ActionRow from posture grid to undo right edge.
 	var top := char_dock.get_node_or_null("VBox/TopRow") as Control if char_dock != null else null
 	var action := char_dock.get_node_or_null("VBox/ActionRow") as HBoxContainer if char_dock != null else null
 	if top == null or action == null or reload_btn == null or undo_btn == null:
 		return
-	if quick_bar == null or quick_bar.get_child_count() < 2:
-		return
-	var q1 := quick_bar.get_child(1) as Control
 	var grid := action.get_node_or_null("QuickGrid") as Control
-	if q1 == null or grid == null:
+	if grid == null:
 		return
 	## Wait until TopRow has laid out.
-	if top.size.x < 8.0 or q1.size.x < 1.0:
+	if top.size.x < 8.0 or undo_btn.size.x < 1.0:
 		return
 	var sep := float(action.get_theme_constant("separation"))
-	var q1_right := quick_bar.position.x + q1.position.x + q1.size.x
 	var undo_right := undo_btn.position.x + undo_btn.size.x
 	var grid_w := grid.size.x if grid.size.x > 1.0 else grid.get_combined_minimum_size().x
-	var w1 := maxf(110.0, q1_right - grid_w - sep)
-	var w2_left := grid_w + sep + w1 + sep
-	var w2 := maxf(110.0, undo_right - w2_left)
-	if _weapon2_btn == null:
-		w1 = maxf(110.0, undo_right - grid_w - sep)
+	var avail := undo_right - grid_w - sep
+	var w: float
+	if _weapon2_btn != null:
+		w = maxf(110.0, (avail - sep) * 0.5)
+	else:
+		w = maxf(110.0, avail)
 	var cur1 := reload_btn.custom_minimum_size.x
 	var cur2 := _weapon2_btn.custom_minimum_size.x if _weapon2_btn != null else 0.0
-	if absf(cur1 - w1) < 0.5 and (_weapon2_btn == null or absf(cur2 - w2) < 0.5):
+	if absf(cur1 - w) < 0.5 and (_weapon2_btn == null or absf(cur2 - w) < 0.5):
 		return
-	reload_btn.custom_minimum_size = Vector2(w1, 56)
+	reload_btn.custom_minimum_size = Vector2(w, 64)
 	if _weapon2_btn != null:
-		_weapon2_btn.custom_minimum_size = Vector2(w2, 56)
+		_weapon2_btn.custom_minimum_size = Vector2(w, 64)
 	_apply_weapon_slot_visuals()
 
 
 func _fill_weapon_btn(btn: Button, slot: int) -> void:
 	if btn == null:
 		return
+	btn.clip_contents = true
 	var w: Dictionary = {}
 	if slot < _weapon_slots.size() and typeof(_weapon_slots[slot]) == TYPE_DICTIONARY:
 		w = _weapon_slots[slot]
@@ -741,10 +881,16 @@ func _fill_weapon_btn(btn: Button, slot: int) -> void:
 	var ammo_row: HBoxContainer = btn.get_node_or_null("AmmoRow")
 	var ammo_lbl: Label = btn.get_node_or_null("AmmoRow/AmmoCountLabel")
 	var icon: TextureRect = btn.get_node_or_null("RifleIcon")
+	## Bottom «ОД:» text pad; reload icon has transparent bleed — pull row left to match.
+	const CARD_PAD_X := 6.0
+	const RELOAD_PAD_X := 2.0
 	if shot_lbl != null:
 		shot_lbl.text = "ОД: %d" % shoot_ap
+		shot_lbl.add_theme_font_size_override("font_size", 9)
+		shot_lbl.offset_left = CARD_PAD_X
 	if reload_lbl != null:
 		reload_lbl.text = "%d ОД" % reload_ap
+		reload_lbl.add_theme_font_size_override("font_size", 9)
 		reload_lbl.visible = true
 	if reload_ic != null:
 		reload_ic.texture = ZZHudIcons.icon_reload(14)
@@ -752,32 +898,53 @@ func _fill_weapon_btn(btn: Button, slot: int) -> void:
 	var reload_row: HBoxContainer = btn.get_node_or_null("ReloadRow")
 	if reload_row != null:
 		reload_row.visible = true
+		reload_row.offset_left = RELOAD_PAD_X
+		reload_row.offset_top = 2.0
+		reload_row.offset_right = RELOAD_PAD_X + 70.0
+		reload_row.offset_bottom = 16.0
+		reload_row.add_theme_constant_override("separation", 1)
 	if ammo_row != null:
 		var card_w := maxf(btn.custom_minimum_size.x, btn.size.x)
-		var half := maxf(48.0, card_w * 0.46)
+		var half := maxf(52.0, card_w * 0.46)
 		ammo_row.offset_left = -half
 		ammo_row.offset_right = half
+		ammo_row.offset_top = 14.0
+		ammo_row.offset_bottom = 26.0
 		ammo_row.add_theme_constant_override("separation", 2)
 	if ammo_lbl != null:
 		ammo_lbl.text = "%d/%d" % [in_mag, total]
+		ammo_lbl.add_theme_font_size_override("font_size", 9)
 	if icon != null:
-		var mock := ZZInventoryIcons.tex(wid)
+		var mock := ZZInventoryIcons.tex_tight(wid)
 		if mock != null:
 			icon.texture = mock
 		elif wid == "glock17":
-			icon.texture = ZZHudIcons.pistol(64, 24)
+			icon.texture = ZZHudIcons.pistol(120, 40)
 		else:
-			icon.texture = ZZHudIcons.rifle(80, 24)
+			icon.texture = ZZHudIcons.rifle(160, 48)
 		var card_w2 := maxf(btn.custom_minimum_size.x, btn.size.x)
-		icon.offset_left = -minf(52.0, card_w2 * 0.42)
-		icon.offset_right = -icon.offset_left
-	var active := slot == _active_weapon_idx
-	if active:
-		btn.tooltip_text = "Перезарядка (%d ОД) · %d/%d" % [reload_ap, in_mag, total]
-	else:
-		btn.tooltip_text = "Сменить оружие (%d ОД) · %d/%d" % [_switch_weapon_cost, in_mag, total]
+		_fit_weapon_icon(icon, card_w2)
+	var tip := _wire_tip_host(btn)
+	if tip != null:
+		tip.tip_item_id = wid
+		tip.tip_qty = 1
+		tip.tip_extra = [
+			["Патроны", "%d/%d" % [in_mag, total]],
+		]
+	btn.tooltip_text = " "  # non-empty → custom tip
 	var col: HBoxContainer = btn.get_node_or_null("AmmoRow/AmmoCol")
 	_refresh_ammo_bullets_on(col, in_mag, mag_size)
+
+
+func _fit_weapon_icon(icon: TextureRect, card_w: float) -> void:
+	## Keep icon inside the card; sit slightly below center (was too high).
+	var half_w := minf(58.0, maxf(42.0, card_w * 0.40))
+	icon.offset_left = -half_w
+	icon.offset_right = half_w
+	icon.offset_top = -16.0
+	icon.offset_bottom = 14.0
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 
 
 func _refresh_weapon_slot_modulate() -> void:
@@ -802,9 +969,14 @@ func _refresh_weapon_slot() -> void:
 			var total := _ammo_in_mag + _ammo_reserve
 			ammo_count_label.text = "%d/%d" % [_ammo_in_mag, total]
 		if reload_btn != null:
-			reload_btn.tooltip_text = "Перезарядка (%d ОД) · %d/%d" % [
-				_reload_cost, _ammo_in_mag, _ammo_in_mag + _ammo_reserve
-			]
+			var tip := _wire_tip_host(reload_btn)
+			if tip != null:
+				tip.tip_item_id = "kar98"
+				tip.tip_qty = 1
+				tip.tip_extra = [
+					["Патроны", "%d/%d" % [_ammo_in_mag, _ammo_in_mag + _ammo_reserve]],
+				]
+			reload_btn.tooltip_text = " "
 		_refresh_ammo_bullets_on(ammo_col, _ammo_in_mag, _mag_size)
 	else:
 		# Keep active slot ammo mirrored for legacy setters.
@@ -865,12 +1037,10 @@ func _apply_social_context(in_battle: bool) -> void:
 
 func _set_social_visible(visible: bool) -> void:
 	chat_dock.visible = visible
-	if not visible and plan_dock != null:
-		plan_dock.visible = false
 
 
 func _layout_social() -> void:
-	# Bottom-left: chat + players in one dock. Bottom-right: battle plan only.
+	# Bottom-left: chat + players.
 	chat_dock.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	chat_dock.anchor_left = 0.0
 	chat_dock.anchor_right = 0.0
@@ -880,19 +1050,6 @@ func _layout_social() -> void:
 	chat_dock.offset_right = SOCIAL_EDGE + CHAT_W
 	chat_dock.offset_bottom = -SOCIAL_EDGE
 	chat_dock.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	if plan_dock != null:
-		plan_dock.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-		plan_dock.anchor_left = 1.0
-		plan_dock.anchor_right = 1.0
-		plan_dock.anchor_top = 1.0
-		plan_dock.anchor_bottom = 1.0
-		plan_dock.offset_left = -(SOCIAL_EDGE + PLAN_W)
-		plan_dock.offset_right = -SOCIAL_EDGE
-		plan_dock.offset_top = -(SOCIAL_EDGE + CHAT_H)
-		plan_dock.offset_bottom = -SOCIAL_EDGE
-		plan_dock.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-		plan_dock.custom_minimum_size = Vector2(PLAN_W, CHAT_H)
-		plan_dock.visible = _in_battle_ui
 	_reveal_chat_history()
 
 
@@ -950,11 +1107,13 @@ func _set_battle_tab_visible(visible: bool) -> void:
 func _on_continue() -> void:
 	var nick := nick_edit.text.strip_edges()
 	if nick == "":
-		login_error.text = "Введите ник"
+		set_login_error("Введите ник")
 		return
 	player_nick = nick
+	_set_login_status("Подключение...")
+	continue_btn.disabled = true
+	## Lobby only after main confirms WebSocket (see main._on_continue).
 	continue_pressed.emit(player_nick)
-	show_lobby()
 
 
 func _on_chat_tab_changed(_tab: int) -> void:

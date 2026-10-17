@@ -3,7 +3,11 @@ class_name ZZProtocol
 
 
 static func join_lobby(nick: String) -> Dictionary:
-	return {"type": "join_lobby", "nick": nick}
+	return {
+		"type": "join_lobby",
+		"nick": nick,
+		"version": ZZServerConfig.PROTOCOL_VERSION,
+	}
 
 
 static func chat(text: String, channel: String = "lobby") -> Dictionary:
@@ -44,6 +48,10 @@ static func reload_action() -> Dictionary:
 
 static func switch_weapon_action(weapon_index: int) -> Dictionary:
 	return {"type": "switch_weapon", "weapon_index": int(weapon_index)}
+
+
+static func inventory_action() -> Dictionary:
+	return {"type": "inventory"}
 
 
 static func inventory_get() -> Dictionary:

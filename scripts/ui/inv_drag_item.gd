@@ -45,12 +45,15 @@ func _get_drag_data(_at_position: Vector2) -> Variant:
 
 	## Dim source while dragging; keep icon so slot doesn't look empty.
 	_set_drag_dim(true)
+	host.notify_item_drag_started()
 	return {"item_id": item_id, "from_slot": from_slot, "qty": qty}
 
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_DRAG_END:
 		_set_drag_dim(false)
+		if host != null:
+			host.notify_item_drag_ended()
 
 
 func _set_drag_dim(on: bool) -> void:
@@ -65,9 +68,10 @@ func _set_drag_dim(on: bool) -> void:
 
 
 func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
+	## Always accept for cursor (no forbidden glyph); real checks run in _drop_data.
 	if host == null or typeof(data) != TYPE_DICTIONARY:
 		return false
-	return host.can_drop_on_slot(accept_slot, data) if accept_slot != "" else host.can_drop_on_bag(data)
+	return str(data.get("item_id", "")) != ""
 
 
 func _drop_data(_at_position: Vector2, data: Variant) -> void:
@@ -76,11 +80,14 @@ func _drop_data(_at_position: Vector2, data: Variant) -> void:
 	_set_drag_dim(false)
 	if accept_slot != "":
 		host.drop_on_slot(accept_slot, data)
+	elif item_id != "":
+		## Drop onto occupied bag cell → swap when types allow.
+		host.drop_on_bag_target(item_id, data)
 	else:
 		host.drop_on_bag(data)
 
 
 func _make_custom_tooltip(_for_text: String) -> Object:
-	if host == null or item_id == "":
+	if item_id == "":
 		return null
-	return host.build_item_tooltip(item_id, qty)
+	return ZZItemTooltip.build(item_id, qty)

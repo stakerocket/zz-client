@@ -27,7 +27,10 @@ func connect_to_server(url: String = "") -> void:
 
 func disconnect_from_server() -> void:
 	_active = false
+	_was_open = false
 	_peer.close()
+	## Fresh peer so the next connect_to_server is reliable after a hard close.
+	_peer = WebSocketPeer.new()
 
 
 func send_dict(data: Dictionary) -> void:

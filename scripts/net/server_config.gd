@@ -1,6 +1,9 @@
 extends RefCounted
 class_name ZZServerConfig
 
+## Must match server domain.ProtocolVersion — bump both on incompatible protocol changes.
+const PROTOCOL_VERSION := "0.1.0"
+
 ## false = локальный сервер, true = прод.
 const USE_PROD := false
 

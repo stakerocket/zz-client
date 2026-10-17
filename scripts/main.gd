@@ -60,9 +60,8 @@ func _ready() -> void:
 		ui.set_undo_enabled(can_plan and not battle.action_queue.is_empty())
 		_refresh_consumable_btns()
 	)
-	battle.history_changed.connect(func(lines: Array):
-		ui.set_history(lines)
-		ui.set_undo_enabled(not battle.input_locked and battle.in_battle and not lines.is_empty())
+	battle.history_changed.connect(func(_lines: Array):
+		ui.set_undo_enabled(not battle.input_locked and battle.in_battle and not battle.action_queue.is_empty())
 		_refresh_consumable_btns()
 	)
 	battle.ap_changed.connect(func(_v):
@@ -108,9 +107,11 @@ func _ready() -> void:
 	ui.inventory_open_pressed.connect(func():
 		battle.request_inventory_get()
 	)
+	ui.battle_inventory_pressed.connect(battle.request_inventory_open)
 	ui.inventory_equip_requested.connect(battle.request_inventory_equip)
 	ui.inventory_unequip_requested.connect(battle.request_inventory_unequip)
 	battle.inventory_state_received.connect(ui.apply_inventory_state)
+	battle.battle_inventory_opened.connect(ui.open_battle_inventory)
 
 
 func _apply_window_fill() -> void:
@@ -202,8 +203,13 @@ func _setup_battle_camera() -> void:
 func _on_continue(nick: String) -> void:
 	battle.set_local_nick(nick)
 	ui.set_room_players([nick])
-	ui.set_find_enabled(false)
-	await battle.connect_and_join_lobby(nick)
+	var ok: bool = await battle.connect_and_join_lobby(nick)
+	if not ok:
+		ui.show_login(false)
+		var err := battle.last_connect_error
+		ui.set_login_error(err if err != "" else "Сервер недоступен")
+		return
+	ui.show_lobby()
 	ui.set_find_enabled(true)
 
 
@@ -212,6 +218,9 @@ func _on_find_match() -> void:
 	var ok: bool = await battle.connect_and_find(ui.player_nick)
 	if not ok:
 		ui.set_searching(false)
+		ui.show_login(false)
+		var err := battle.last_connect_error
+		ui.set_login_error(err if err != "" else "Сервер недоступен")
 
 
 func _on_battle_started() -> void:
@@ -231,7 +240,6 @@ func _on_battle_started() -> void:
 		battle.local_medkits, battle.medkit_heal_min, battle.medkit_heal_max, battle.medkit_cost
 	)
 	_refresh_quick_bar()
-	ui.set_history([])
 	ui.set_undo_enabled(false)
 	_refresh_consumable_btns()
 
@@ -268,9 +276,6 @@ func _chat_band_top_y() -> float:
 	var found := false
 	if ui != null and ui.chat_dock != null and ui.chat_dock.visible:
 		top_ui = minf(top_ui, ui.chat_dock.get_global_rect().position.y)
-		found = true
-	if ui != null and ui.plan_dock != null and ui.plan_dock.visible:
-		top_ui = minf(top_ui, ui.plan_dock.get_global_rect().position.y)
 		found = true
 	if not found:
 		return vp.position.y + vp.size.y * (1.0 - CHAT_BOTTOM_FRAC)
@@ -542,7 +547,12 @@ func _on_battle_ended(winner_id: String) -> void:
 func _on_return_to_lobby() -> void:
 	_set_battle_view_active(false)
 	battle.clear_battle_visuals()
-	ui.show_lobby()
 	ui.set_find_enabled(false)
-	await battle.connect_and_join_lobby(ui.player_nick)
+	var ok: bool = await battle.connect_and_join_lobby(ui.player_nick)
+	if not ok:
+		ui.show_login(false)
+		var err := battle.last_connect_error
+		ui.set_login_error(err if err != "" else "Сервер недоступен")
+		return
+	ui.show_lobby()
 	ui.set_find_enabled(true)
