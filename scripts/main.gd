@@ -49,6 +49,7 @@ func _ready() -> void:
 	battle.timer_changed.connect(ui.set_timer_seconds)
 	battle.battle_started.connect(_on_battle_started)
 	battle.battle_ended.connect(_on_battle_ended)
+	battle.rules_changed.connect(ui.refresh_lobby_stats_from_rules)
 	battle.room_players_changed.connect(ui.set_room_players)
 	battle.chat_received.connect(func(nick: String, text: String, channel: String):
 		ui.append_chat(nick, text, channel)
@@ -57,23 +58,28 @@ func _ready() -> void:
 		var can_plan := not locked and battle.in_battle
 		ui.set_end_enabled(can_plan)
 		ui.set_undo_enabled(can_plan and not battle.action_queue.is_empty())
-		_refresh_medkit_btn()
+		_refresh_consumable_btns()
 	)
 	battle.history_changed.connect(func(lines: Array):
 		ui.set_history(lines)
 		ui.set_undo_enabled(not battle.input_locked and battle.in_battle and not lines.is_empty())
-		_refresh_medkit_btn()
+		_refresh_consumable_btns()
 	)
 	battle.ap_changed.connect(func(_v):
 		ui.set_posture(battle.local_posture)
-		_refresh_medkit_btn()
+		_refresh_consumable_btns()
 	)
 	battle.hp_changed.connect(func(_v):
-		_refresh_medkit_btn()
+		_refresh_consumable_btns()
 	)
 	battle.medkits_changed.connect(func(count: int):
 		ui.set_medkit_count(count, battle.medkit_heal_min, battle.medkit_heal_max, battle.medkit_cost)
-		_refresh_medkit_btn()
+		_refresh_consumable_btns()
+	)
+	battle.ammo_changed.connect(func(in_mag: int, reserve: int):
+		ui.set_ammo(in_mag, reserve)
+		ui.set_reload_cost(battle.reload_cost)
+		_refresh_consumable_btns()
 	)
 
 	ui.continue_pressed.connect(_on_continue)
@@ -82,6 +88,7 @@ func _ready() -> void:
 	ui.undo_pressed.connect(battle.request_undo)
 	ui.posture_pressed.connect(battle.request_posture)
 	ui.medkit_pressed.connect(battle.request_medkit)
+	ui.reload_pressed.connect(battle.request_reload)
 	ui.chat_submitted.connect(func(text: String, channel: String):
 		battle.send_chat(text, channel)
 	)
@@ -169,8 +176,14 @@ func _on_battle_started() -> void:
 	ui.set_ap(battle.local_ap)
 	ui.set_hp(battle.local_hp)
 	ui.set_posture(battle.local_posture)
+	ui.set_ammo(battle.local_ammo_in_mag, battle.local_ammo_reserve)
+	ui.set_reload_cost(battle.reload_cost)
+	ui.set_medkit_count(
+		battle.local_medkits, battle.medkit_heal_min, battle.medkit_heal_max, battle.medkit_cost
+	)
 	ui.set_history([])
 	ui.set_undo_enabled(false)
+	_refresh_consumable_btns()
 
 
 func _on_viewport_size_changed() -> void:
@@ -224,7 +237,8 @@ func _chat_bottom_frac() -> float:
 	if vp.size.y < 1.0:
 		return CHAT_BOTTOM_FRAC
 	var reserved := (vp.position.y + vp.size.y) - _chat_strip_top_y()
-	return clampf(reserved / vp.size.y, 0.22, 0.50)
+	# Compact corner chat (~150px) — don't reserve a full HUD strip.
+	return clampf(reserved / vp.size.y, 0.10, 0.28)
 
 
 func _apply_camera_from_focus() -> void:
@@ -419,18 +433,20 @@ func _clamp_focus() -> void:
 	_focus.y = 0.0
 
 
-func _refresh_medkit_btn() -> void:
+func _refresh_consumable_btns() -> void:
 	var can_plan := not battle.input_locked and battle.in_battle
 	ui.set_medkit_enabled(
 		can_plan
 		and battle.local_ap >= battle.medkit_cost
 		and battle.local_medkits > 0
 	)
+	ui.set_reload_enabled(can_plan and battle.local_ap >= battle.reload_cost)
 
 
 func _on_battle_ended(winner_id: String) -> void:
 	ui.set_end_enabled(false)
 	ui.set_medkit_enabled(false)
+	ui.set_reload_enabled(false)
 	ui.show_battle_result(winner_id != "" and winner_id == battle.your_id)
 
 

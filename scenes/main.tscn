@@ -1,4 +1,4 @@
-[gd_scene load_steps=19 format=3 uid="uid://zonezero_main"]
+[gd_scene load_steps=22 format=3 uid="uid://zonezero_main"]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/battle/grid_view.gd" id="2_grid"]
@@ -57,68 +57,84 @@ content_margin_right = 14
 content_margin_bottom = 10
 
 [sub_resource type="StyleBoxFlat" id="StyleChatEdit"]
-bg_color = Color(0.12, 0.12, 0.12, 0.85)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.32, 0.32, 0.32, 0.7)
+bg_color = Color(0.08, 0.08, 0.09, 0.28)
+border_width_left = 0
+border_width_top = 0
+border_width_right = 0
+border_width_bottom = 0
+border_color = Color(0, 0, 0, 0)
 corner_radius_top_left = 2
 corner_radius_top_right = 2
 corner_radius_bottom_right = 2
 corner_radius_bottom_left = 2
 content_margin_left = 6
-content_margin_top = 2
+content_margin_top = 3
 content_margin_right = 6
-content_margin_bottom = 2
+content_margin_bottom = 3
 
 [sub_resource type="StyleBoxFlat" id="StyleChatEditFocus"]
-bg_color = Color(0.14, 0.14, 0.14, 0.9)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.42, 0.42, 0.42, 0.8)
+bg_color = Color(0.1, 0.1, 0.12, 0.38)
+border_width_left = 0
+border_width_top = 0
+border_width_right = 0
+border_width_bottom = 0
+border_color = Color(0, 0, 0, 0)
 corner_radius_top_left = 2
 corner_radius_top_right = 2
 corner_radius_bottom_right = 2
 corner_radius_bottom_left = 2
 content_margin_left = 6
-content_margin_top = 2
+content_margin_top = 3
 content_margin_right = 6
-content_margin_bottom = 2
+content_margin_bottom = 3
 
 [sub_resource type="StyleBoxFlat" id="StyleChatSend"]
-bg_color = Color(0.16, 0.16, 0.16, 0.9)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.34, 0.34, 0.34, 0.75)
+bg_color = Color(0.1, 0.1, 0.12, 0.3)
+border_width_left = 0
+border_width_top = 0
+border_width_right = 0
+border_width_bottom = 0
+border_color = Color(0, 0, 0, 0)
 corner_radius_top_left = 2
 corner_radius_top_right = 2
 corner_radius_bottom_right = 2
 corner_radius_bottom_left = 2
-content_margin_left = 2
-content_margin_top = 1
-content_margin_right = 2
-content_margin_bottom = 1
+content_margin_left = 4
+content_margin_top = 2
+content_margin_right = 4
+content_margin_bottom = 2
 
 [sub_resource type="StyleBoxFlat" id="StyleChatSendHover"]
-bg_color = Color(0.22, 0.22, 0.22, 0.95)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.45, 0.45, 0.45, 0.85)
+bg_color = Color(0.16, 0.16, 0.18, 0.45)
+border_width_left = 0
+border_width_top = 0
+border_width_right = 0
+border_width_bottom = 0
+border_color = Color(0, 0, 0, 0)
 corner_radius_top_left = 2
 corner_radius_top_right = 2
 corner_radius_bottom_right = 2
 corner_radius_bottom_left = 2
-content_margin_left = 2
-content_margin_top = 1
-content_margin_right = 2
-content_margin_bottom = 1
+content_margin_left = 4
+content_margin_top = 2
+content_margin_right = 4
+content_margin_bottom = 2
+
+[sub_resource type="StyleBoxFlat" id="StyleChatInputFrame"]
+bg_color = Color(0.06, 0.06, 0.07, 0.22)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.7, 0.7, 0.72, 0.18)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+content_margin_left = 3
+content_margin_top = 2
+content_margin_right = 3
+content_margin_bottom = 2
 
 [sub_resource type="StyleBoxFlat" id="StylePlayersTitle"]
 bg_color = Color(0, 0, 0, 0)
@@ -131,6 +147,38 @@ content_margin_bottom = 8
 
 [sub_resource type="StyleBoxFlat" id="StylePlayerListEmpty"]
 bg_color = Color(0, 0, 0, 0)
+
+[sub_resource type="StyleBoxFlat" id="StyleChatDockPanel"]
+bg_color = Color(0.05, 0.05, 0.06, 0.42)
+border_width_left = 0
+border_width_top = 0
+border_width_right = 0
+border_width_bottom = 0
+border_color = Color(0, 0, 0, 0)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+content_margin_left = 4
+content_margin_top = 3
+content_margin_right = 4
+content_margin_bottom = 3
+
+[sub_resource type="StyleBoxFlat" id="StylePlayersDockPanel"]
+bg_color = Color(0.05, 0.05, 0.06, 0.42)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.35, 0.35, 0.38, 0.35)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+content_margin_left = 4
+content_margin_top = 3
+content_margin_right = 4
+content_margin_bottom = 3
 
 [sub_resource type="StyleBoxFlat" id="StyleResultPanel"]
 bg_color = Color(0.12, 0.11, 0.1, 0.94)
@@ -181,24 +229,24 @@ script = ExtResource("5_ui")
 
 [node name="ChatDock" type="PanelContainer" parent="UI"]
 visible = false
-anchors_preset = 12
+anchors_preset = 2
 anchor_top = 1.0
-anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 2.0
-offset_top = -148.0
-offset_right = -163.0
-offset_bottom = -2.0
-grow_horizontal = 2
+offset_left = 8.0
+offset_top = -158.0
+offset_right = 308.0
+offset_bottom = -8.0
+grow_horizontal = 0
 grow_vertical = 0
 mouse_filter = 0
+theme_override_styles/panel = SubResource("StyleChatDockPanel")
 
 [node name="Margin" type="MarginContainer" parent="UI/ChatDock"]
 layout_mode = 2
-theme_override_constants/margin_left = 1
-theme_override_constants/margin_top = 1
-theme_override_constants/margin_right = 1
-theme_override_constants/margin_bottom = 1
+theme_override_constants/margin_left = 2
+theme_override_constants/margin_top = 2
+theme_override_constants/margin_right = 2
+theme_override_constants/margin_bottom = 2
 
 [node name="VBox" type="VBoxContainer" parent="UI/ChatDock/Margin"]
 layout_mode = 2
@@ -214,41 +262,49 @@ theme_override_font_sizes/font_size = 9
 layout_mode = 2
 bbcode_enabled = true
 scroll_following = true
-custom_minimum_size = Vector2(0, 56)
-theme_override_font_sizes/normal_font_size = 9
-theme_override_font_sizes/bold_font_size = 9
+fit_content = false
+custom_minimum_size = Vector2(0, 88)
+theme_override_colors/default_color = Color(0.9, 0.9, 0.9, 0.92)
+theme_override_font_sizes/normal_font_size = 10
+theme_override_font_sizes/bold_font_size = 10
 
 [node name="Бой" type="RichTextLabel" parent="UI/ChatDock/Margin/VBox/Tabs"]
 visible = false
 layout_mode = 2
 bbcode_enabled = true
 scroll_following = true
-custom_minimum_size = Vector2(0, 56)
-theme_override_font_sizes/normal_font_size = 9
-theme_override_font_sizes/bold_font_size = 9
+fit_content = false
+custom_minimum_size = Vector2(0, 88)
+theme_override_colors/default_color = Color(0.9, 0.9, 0.9, 0.92)
+theme_override_font_sizes/normal_font_size = 10
+theme_override_font_sizes/bold_font_size = 10
 
-[node name="InputRow" type="HBoxContainer" parent="UI/ChatDock/Margin/VBox"]
-custom_minimum_size = Vector2(0, 20)
+[node name="InputFrame" type="PanelContainer" parent="UI/ChatDock/Margin/VBox"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleChatInputFrame")
+
+[node name="InputRow" type="HBoxContainer" parent="UI/ChatDock/Margin/VBox/InputFrame"]
+custom_minimum_size = Vector2(0, 22)
 layout_mode = 2
 theme_override_constants/separation = 3
 
-[node name="ChatEdit" type="LineEdit" parent="UI/ChatDock/Margin/VBox/InputRow"]
-custom_minimum_size = Vector2(0, 20)
+[node name="ChatEdit" type="LineEdit" parent="UI/ChatDock/Margin/VBox/InputFrame/InputRow"]
+custom_minimum_size = Vector2(0, 22)
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_colors/font_color = Color(0.82, 0.82, 0.82, 1)
-theme_override_colors/font_placeholder_color = Color(0.5, 0.5, 0.5, 0.75)
-theme_override_font_sizes/font_size = 9
+theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 0.95)
+theme_override_colors/font_placeholder_color = Color(0.6, 0.6, 0.6, 0.55)
+theme_override_font_sizes/font_size = 10
 theme_override_styles/normal = SubResource("StyleChatEdit")
 theme_override_styles/focus = SubResource("StyleChatEditFocus")
 theme_override_styles/read_only = SubResource("StyleChatEdit")
 placeholder_text = "Сообщение..."
 
-[node name="SendBtn" type="Button" parent="UI/ChatDock/Margin/VBox/InputRow"]
-custom_minimum_size = Vector2(22, 20)
+[node name="SendBtn" type="Button" parent="UI/ChatDock/Margin/VBox/InputFrame/InputRow"]
+custom_minimum_size = Vector2(28, 22)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.75, 0.75, 0.75, 1)
-theme_override_colors/font_hover_color = Color(0.92, 0.92, 0.92, 1)
+theme_override_colors/font_color = Color(0.82, 0.82, 0.82, 0.9)
+theme_override_colors/font_hover_color = Color(0.95, 0.95, 0.95, 1)
 theme_override_font_sizes/font_size = 11
 theme_override_styles/normal = SubResource("StyleChatSend")
 theme_override_styles/hover = SubResource("StyleChatSendHover")
@@ -384,10 +440,10 @@ layout_mode = 1
 anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
-offset_left = -132.0
+offset_left = -168.0
 offset_top = 4.0
 offset_right = -2.0
-offset_bottom = 78.0
+offset_bottom = 236.0
 grow_horizontal = 0
 
 [node name="VBox" type="VBoxContainer" parent="UI/LobbyScreen/PlayerCard"]
@@ -407,26 +463,74 @@ horizontal_alignment = 1
 [node name="InfoMargin" type="MarginContainer" parent="UI/LobbyScreen/PlayerCard/VBox"]
 layout_mode = 2
 size_flags_vertical = 0
-theme_override_constants/margin_left = 3
-theme_override_constants/margin_top = 0
-theme_override_constants/margin_right = 3
-theme_override_constants/margin_bottom = 2
+theme_override_constants/margin_left = 4
+theme_override_constants/margin_top = 1
+theme_override_constants/margin_right = 4
+theme_override_constants/margin_bottom = 3
 
 [node name="InfoVBox" type="VBoxContainer" parent="UI/LobbyScreen/PlayerCard/VBox/InfoMargin"]
 layout_mode = 2
 theme_override_constants/separation = 0
 
+[node name="LevelLabel" type="Label" parent="UI/LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 10
+text = "Уровень: —"
+horizontal_alignment = 0
+
+[node name="StrLabel" type="Label" parent="UI/LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 10
+text = "Сила: —"
+horizontal_alignment = 0
+
+[node name="AgiLabel" type="Label" parent="UI/LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 10
+text = "Ловкость: —"
+horizontal_alignment = 0
+
+[node name="EndLabel" type="Label" parent="UI/LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 10
+text = "Выносливость: —"
+horizontal_alignment = 0
+
+[node name="IntuLabel" type="Label" parent="UI/LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 10
+text = "Интуиция: —"
+horizontal_alignment = 0
+
+[node name="AccLabel" type="Label" parent="UI/LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 10
+text = "Меткость: —"
+horizontal_alignment = 0
+
+[node name="IntLabel" type="Label" parent="UI/LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 10
+text = "Интеллект: —"
+horizontal_alignment = 0
+
 [node name="HPLabel" type="Label" parent="UI/LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 10
-text = "ХП: 100"
-horizontal_alignment = 1
+text = "ХП: —"
+horizontal_alignment = 0
 
 [node name="APLabel" type="Label" parent="UI/LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 10
-text = "ОД: 16"
-horizontal_alignment = 1
+text = "ОД: —"
+horizontal_alignment = 0
+
+[node name="CarryLabel" type="Label" parent="UI/LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 10
+text = "Вес: —"
+horizontal_alignment = 0
 
 [node name="FindCenter" type="CenterContainer" parent="UI/LobbyScreen"]
 layout_mode = 1
@@ -462,10 +566,10 @@ anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -160.0
-offset_top = -148.0
-offset_right = -2.0
-offset_bottom = -2.0
+offset_left = -168.0
+offset_top = -158.0
+offset_right = -8.0
+offset_bottom = -8.0
 grow_horizontal = 0
 grow_vertical = 0
 theme_override_constants/separation = 2
@@ -475,6 +579,7 @@ custom_minimum_size = Vector2(150, 0)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_stretch_ratio = 1.0
+theme_override_styles/panel = SubResource("StylePlayersDockPanel")
 
 [node name="VBox" type="VBoxContainer" parent="UI/BottomBar/PlayersPanel"]
 layout_mode = 2
@@ -603,6 +708,12 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 8
 text = "Аптечка ×5"
 
+[node name="ReloadBtn" type="Button" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox"]
+custom_minimum_size = Vector2(0, 18)
+layout_mode = 2
+theme_override_font_sizes/font_size = 8
+text = "Перезарядка (6)"
+
 [node name="UndoBtn" type="Button" parent="UI/BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox"]
 custom_minimum_size = Vector2(0, 18)
 layout_mode = 2
@@ -631,7 +742,7 @@ anchor_right = 1.0
 offset_left = -132.0
 offset_top = 4.0
 offset_right = -2.0
-offset_bottom = 78.0
+offset_bottom = 108.0
 grow_horizontal = 0
 
 [node name="VBox" type="VBoxContainer" parent="UI/BattleHud/PlayerCard"]
@@ -676,6 +787,18 @@ horizontal_alignment = 1
 layout_mode = 2
 theme_override_font_sizes/font_size = 10
 text = "Стойка: стоя"
+horizontal_alignment = 1
+
+[node name="AmmoLabel" type="Label" parent="UI/BattleHud/PlayerCard/VBox/InfoMargin/InfoVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 10
+text = "Патроны: 6 | 24"
+horizontal_alignment = 1
+
+[node name="MedkitsLabel" type="Label" parent="UI/BattleHud/PlayerCard/VBox/InfoMargin/InfoVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 10
+text = "Аптечки: 5"
 horizontal_alignment = 1
 
 [node name="ResultOverlay" type="Control" parent="UI/BattleHud"]

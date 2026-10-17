@@ -7,16 +7,25 @@ signal end_turn_pressed
 signal undo_pressed
 signal posture_pressed(posture: String)
 signal medkit_pressed
+signal reload_pressed
 signal chat_submitted(text: String, channel: String)
 signal return_to_lobby_pressed
 
-const DEFAULT_HP := 100
-const DEFAULT_AP := 16
 const TAB_LOBBY := 0
 const TAB_BATTLE := 1
+const CHAT_W := 300.0
+const CHAT_H := 150.0
+const CHAT_COLLAPSED_H := 36.0
+const PLAYERS_W := 160.0
+const SOCIAL_EDGE := 8.0
+const CHAT_FADE_IDLE_SEC := 7.0
+const CHAT_FADE_DUR := 0.45
 
 var player_nick: String = ""
 var _in_battle_ui: bool = false
+var _chat_history_visible: bool = true
+var _chat_fade_tween: Tween
+var _chat_idle_timer: Timer
 
 @onready var login_screen: Control = $LoginScreen
 @onready var lobby_screen: Control = $LobbyScreen
@@ -29,15 +38,25 @@ var _in_battle_ui: bool = false
 @onready var login_error: Label = $LoginScreen/Center/Panel/Margin/InnerCenter/VBox/ErrorLabel
 
 @onready var lobby_nick: Label = $LobbyScreen/PlayerCard/VBox/CardTitle
+@onready var lobby_level: Label = $LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox/LevelLabel
+@onready var lobby_str: Label = $LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox/StrLabel
+@onready var lobby_agi: Label = $LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox/AgiLabel
+@onready var lobby_end: Label = $LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox/EndLabel
+@onready var lobby_intu: Label = $LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox/IntuLabel
+@onready var lobby_acc: Label = $LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox/AccLabel
+@onready var lobby_int: Label = $LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox/IntLabel
 @onready var lobby_hp: Label = $LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox/HPLabel
 @onready var lobby_ap: Label = $LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox/APLabel
+@onready var lobby_carry: Label = $LobbyScreen/PlayerCard/VBox/InfoMargin/InfoVBox/CarryLabel
 @onready var find_btn: Button = $LobbyScreen/FindCenter/FindBtn
 
 @onready var chat_tabs: TabContainer = $ChatDock/Margin/VBox/Tabs
 @onready var lobby_chat_log: RichTextLabel = $ChatDock/Margin/VBox/Tabs/Лобби
 @onready var battle_chat_log: RichTextLabel = $ChatDock/Margin/VBox/Tabs/Бой
-@onready var chat_edit: LineEdit = $ChatDock/Margin/VBox/InputRow/ChatEdit
-@onready var chat_send_btn: Button = $ChatDock/Margin/VBox/InputRow/SendBtn
+@onready var chat_input_frame: PanelContainer = $ChatDock/Margin/VBox/InputFrame
+@onready var chat_edit: LineEdit = $ChatDock/Margin/VBox/InputFrame/InputRow/ChatEdit
+@onready var chat_send_btn: Button = $ChatDock/Margin/VBox/InputFrame/InputRow/SendBtn
+@onready var players_panel: PanelContainer = $BottomBar/PlayersPanel
 @onready var room_list: ItemList = $BottomBar/PlayersPanel/VBox/PlayerList
 
 @onready var battle_turn: Label = $BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox/TurnLabel
@@ -47,12 +66,15 @@ var _in_battle_ui: bool = false
 @onready var sit_btn: Button = $BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox/PostureRow/SitBtn
 @onready var cover_btn: Button = $BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox/PostureRow/CoverBtn
 @onready var medkit_btn: Button = $BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox/MedkitBtn
+@onready var reload_btn: Button = $BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox/ReloadBtn
 @onready var undo_btn: Button = $BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox/UndoBtn
 @onready var history_list: ItemList = $BattleHud/BattlePanel/VBox/InfoMargin/InfoVBox/HistoryList
 @onready var battle_nick: Label = $BattleHud/PlayerCard/VBox/CardTitle
 @onready var battle_hp: Label = $BattleHud/PlayerCard/VBox/InfoMargin/InfoVBox/HPLabel
 @onready var battle_ap: Label = $BattleHud/PlayerCard/VBox/InfoMargin/InfoVBox/APLabel
 @onready var battle_posture: Label = $BattleHud/PlayerCard/VBox/InfoMargin/InfoVBox/PostureLabel
+@onready var battle_ammo: Label = $BattleHud/PlayerCard/VBox/InfoMargin/InfoVBox/AmmoLabel
+@onready var battle_medkits: Label = $BattleHud/PlayerCard/VBox/InfoMargin/InfoVBox/MedkitsLabel
 
 @onready var result_overlay: Control = $BattleHud/ResultOverlay
 @onready var result_label: Label = $BattleHud/ResultOverlay/Center/Panel/VBox/ResultLabel
@@ -69,10 +91,13 @@ func _ready() -> void:
 	sit_btn.pressed.connect(func(): posture_pressed.emit("sit"))
 	cover_btn.pressed.connect(func(): posture_pressed.emit("cover"))
 	medkit_btn.pressed.connect(func(): medkit_pressed.emit())
+	reload_btn.pressed.connect(func(): reload_pressed.emit())
 	lobby_btn.pressed.connect(func(): return_to_lobby_pressed.emit())
 	chat_send_btn.pressed.connect(_on_chat_send)
 	chat_edit.text_submitted.connect(func(_t): _on_chat_send())
 	chat_tabs.tab_changed.connect(_on_chat_tab_changed)
+	chat_edit.focus_entered.connect(_reveal_chat_history)
+	chat_dock.gui_input.connect(_on_chat_dock_gui_input)
 	end_btn.disabled = true
 	undo_btn.disabled = true
 	result_overlay.visible = false
@@ -85,7 +110,56 @@ func _ready() -> void:
 	# Chat + players panel must block map clicks (STOP).
 	chat_dock.mouse_filter = Control.MOUSE_FILTER_STOP
 	bottom_bar.mouse_filter = Control.MOUSE_FILTER_STOP
+	_setup_chat_fade_timer()
+	_make_chat_tabs_transparent()
 	show_login()
+
+
+func _make_chat_tabs_transparent() -> void:
+	if chat_tabs == null:
+		return
+	var empty := StyleBoxEmpty.new()
+	chat_tabs.add_theme_stylebox_override("panel", empty)
+	var tab := StyleBoxFlat.new()
+	tab.bg_color = Color(0.1, 0.1, 0.12, 0.35)
+	tab.set_corner_radius_all(2)
+	tab.content_margin_left = 6
+	tab.content_margin_right = 6
+	tab.content_margin_top = 2
+	tab.content_margin_bottom = 2
+	chat_tabs.add_theme_stylebox_override("tab_selected", tab)
+	var tab_un := tab.duplicate()
+	tab_un.bg_color = Color(0.08, 0.08, 0.09, 0.2)
+	chat_tabs.add_theme_stylebox_override("tab_unselected", tab_un)
+	for log in [lobby_chat_log, battle_chat_log]:
+		if log == null:
+			continue
+		log.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
+		log.add_theme_color_override("default_color", Color(0.9, 0.9, 0.9, 0.92))
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not chat_dock.visible:
+		return
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER:
+			_reveal_chat_history()
+			if chat_edit.editable and not chat_edit.has_focus():
+				chat_edit.grab_focus()
+			get_viewport().set_input_as_handled()
+
+
+func _setup_chat_fade_timer() -> void:
+	_chat_idle_timer = Timer.new()
+	_chat_idle_timer.wait_time = CHAT_FADE_IDLE_SEC
+	_chat_idle_timer.one_shot = true
+	_chat_idle_timer.timeout.connect(_fade_chat_history)
+	add_child(_chat_idle_timer)
+
+
+func _on_chat_dock_gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed:
+		_reveal_chat_history()
 
 
 func show_login() -> void:
@@ -104,8 +178,7 @@ func show_lobby() -> void:
 	battle_hud.visible = false
 	result_overlay.visible = false
 	lobby_nick.text = player_nick
-	lobby_hp.text = "ХП: %d" % DEFAULT_HP
-	lobby_ap.text = "ОД: %d" % DEFAULT_AP
+	refresh_lobby_stats_from_rules()
 	find_btn.text = "Найти бой"
 	set_find_enabled(false)
 	_set_room_players([player_nick])
@@ -160,6 +233,7 @@ func append_chat(nick: String, text: String, channel: String = "lobby") -> void:
 	else:
 		if lobby_chat_log != null:
 			lobby_chat_log.append_text(line)
+	_reveal_chat_history()
 
 
 func set_turn(turn: int) -> void:
@@ -171,16 +245,43 @@ func set_timer_seconds(seconds: float) -> void:
 	battle_timer.text = "%d:%02d" % [s / 60, s % 60]
 
 
+func refresh_lobby_stats_from_rules() -> void:
+	if not ZZLos.has_rules():
+		_set_lobby_stats_placeholder()
+		return
+	var lvl := ZZLos.rule_i("default_level")
+	var s := ZZLos.default_stat()
+	lobby_level.text = "Уровень: %d" % lvl
+	lobby_str.text = "Сила: %d" % s
+	lobby_agi.text = "Ловкость: %d" % s
+	lobby_end.text = "Выносливость: %d" % s
+	lobby_intu.text = "Интуиция: %d" % s
+	lobby_acc.text = "Меткость: %d" % s
+	lobby_int.text = "Интеллект: %d" % s
+	lobby_hp.text = "ХП: %d" % ZZLos.compute_max_hp(s)
+	lobby_ap.text = "ОД: %d" % ZZLos.compute_max_ap(s, s, s)
+	lobby_carry.text = "Вес: %d" % ZZLos.compute_carry_weight(s)
+
+
+func _set_lobby_stats_placeholder() -> void:
+	lobby_level.text = "Уровень: —"
+	lobby_str.text = "Сила: —"
+	lobby_agi.text = "Ловкость: —"
+	lobby_end.text = "Выносливость: —"
+	lobby_intu.text = "Интуиция: —"
+	lobby_acc.text = "Меткость: —"
+	lobby_int.text = "Интеллект: —"
+	lobby_hp.text = "ХП: —"
+	lobby_ap.text = "ОД: —"
+	lobby_carry.text = "Вес: —"
+
+
 func set_ap(value: int) -> void:
 	battle_ap.text = "ОД: %d" % value
-	if lobby_screen.visible:
-		lobby_ap.text = "ОД: %d" % value
 
 
 func set_hp(value: int) -> void:
 	battle_hp.text = "ХП: %d" % value
-	if lobby_screen.visible:
-		lobby_hp.text = "ХП: %d" % value
 
 
 func set_posture(posture: String) -> void:
@@ -215,8 +316,25 @@ func set_medkit_enabled(enabled: bool) -> void:
 	medkit_btn.disabled = not enabled
 
 
+func set_reload_enabled(enabled: bool) -> void:
+	if reload_btn != null:
+		reload_btn.disabled = not enabled
+
+
 func set_medkit_count(count: int, heal_min: int = 15, heal_max: int = 30, ap_cost: int = 3) -> void:
 	medkit_btn.text = "Аптечка ×%d (+%d–%d / %d)" % [maxi(0, count), heal_min, heal_max, ap_cost]
+	if battle_medkits != null:
+		battle_medkits.text = "Аптечки: %d" % maxi(0, count)
+
+
+func set_reload_cost(ap_cost: int) -> void:
+	if reload_btn != null:
+		reload_btn.text = "Перезарядка (%d)" % ap_cost
+
+
+func set_ammo(in_mag: int, reserve: int) -> void:
+	if battle_ammo != null:
+		battle_ammo.text = "Патроны: %d | %d" % [maxi(0, in_mag), maxi(0, reserve)]
 
 
 func set_undo_enabled(enabled: bool) -> void:
@@ -240,29 +358,69 @@ func _set_social_visible(visible: bool) -> void:
 
 
 func _layout_social() -> void:
-	# Fixed strip: chat left, players right — compact, tight to screen edges.
-	const EDGE := 2.0
-	const GAP := 1.0
-	const STRIP_H := 148.0
-	const PLAYERS_W := 160.0
-	chat_dock.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	# Corner docks: map stays visible in the center bottom.
+	chat_dock.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	chat_dock.anchor_left = 0.0
-	chat_dock.anchor_right = 1.0
-	chat_dock.offset_left = EDGE
-	chat_dock.offset_right = -(PLAYERS_W + EDGE + GAP)
-	chat_dock.offset_top = -STRIP_H
-	chat_dock.offset_bottom = -EDGE
-	chat_dock.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	chat_dock.anchor_right = 0.0
+	chat_dock.anchor_top = 1.0
+	chat_dock.anchor_bottom = 1.0
+	chat_dock.offset_left = SOCIAL_EDGE
+	chat_dock.offset_right = SOCIAL_EDGE + CHAT_W
+	chat_dock.offset_bottom = -SOCIAL_EDGE
+	chat_dock.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	bottom_bar.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
 	bottom_bar.anchor_left = 1.0
 	bottom_bar.anchor_right = 1.0
 	bottom_bar.anchor_top = 1.0
 	bottom_bar.anchor_bottom = 1.0
-	bottom_bar.offset_left = -PLAYERS_W
-	bottom_bar.offset_right = -EDGE
-	bottom_bar.offset_top = -STRIP_H
-	bottom_bar.offset_bottom = -EDGE
+	bottom_bar.offset_left = -(SOCIAL_EDGE + PLAYERS_W)
+	bottom_bar.offset_right = -SOCIAL_EDGE
+	bottom_bar.offset_top = -(SOCIAL_EDGE + CHAT_H)
+	bottom_bar.offset_bottom = -SOCIAL_EDGE
 	bottom_bar.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	bottom_bar.custom_minimum_size = Vector2(PLAYERS_W, CHAT_H)
+	if players_panel != null:
+		players_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_reveal_chat_history()
+
+
+func _apply_chat_dock_height(expanded: bool) -> void:
+	var h := CHAT_H if expanded else CHAT_COLLAPSED_H
+	chat_dock.custom_minimum_size = Vector2(CHAT_W, h)
+	chat_dock.offset_top = -(SOCIAL_EDGE + h)
+	chat_dock.offset_bottom = -SOCIAL_EDGE
+
+
+func _reveal_chat_history() -> void:
+	if chat_tabs == null:
+		return
+	_chat_history_visible = true
+	if _chat_fade_tween != null and _chat_fade_tween.is_valid():
+		_chat_fade_tween.kill()
+	chat_tabs.visible = true
+	chat_tabs.modulate.a = 1.0
+	_apply_chat_dock_height(true)
+	if _chat_idle_timer != null:
+		_chat_idle_timer.start(CHAT_FADE_IDLE_SEC)
+
+
+func _fade_chat_history() -> void:
+	if chat_tabs == null:
+		return
+	if chat_edit != null and chat_edit.has_focus():
+		_chat_idle_timer.start(CHAT_FADE_IDLE_SEC)
+		return
+	_chat_history_visible = false
+	if _chat_fade_tween != null and _chat_fade_tween.is_valid():
+		_chat_fade_tween.kill()
+	_chat_fade_tween = create_tween()
+	_chat_fade_tween.tween_property(chat_tabs, "modulate:a", 0.0, CHAT_FADE_DUR)
+	_chat_fade_tween.tween_callback(func():
+		if _chat_history_visible:
+			return
+		chat_tabs.visible = false
+		_apply_chat_dock_height(false)
+	)
 
 
 func _set_battle_tab_visible(visible: bool) -> void:

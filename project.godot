@@ -28,6 +28,4 @@ Sfx="*res://scripts/audio/sfx.gd"
 window/size/viewport_width=1280
 window/size/viewport_height=720
 window/stretch/mode="canvas_items"
-# ignore: UI/lobby/login fill the whole window. Do NOT use keep/expand for "battle framing" —
-# that is a global setting and breaks lobby (black side bars). Battle void ≠ lobby letterbox.
-window/stretch/aspect="ignore"
+"battle framingâ#thatisaglobalsettingandbreakslobby(blacksidebars).Battlevoidâ lobbyletterbox.window/stretch/aspect"="ignore"

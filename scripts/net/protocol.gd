@@ -36,3 +36,7 @@ static func posture_action(posture: String) -> Dictionary:
 
 static func medkit_action() -> Dictionary:
 	return {"type": "medkit"}
+
+
+static func reload_action() -> Dictionary:
+	return {"type": "reload"}

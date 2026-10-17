@@ -500,8 +500,8 @@ func set_hp(value: int, animate_death: bool = true, front_blocked: bool = false)
 		_reset_alive_visual()
 
 
-func apply_hit(damage: int, hp_after: int, front_blocked: bool = false) -> void:
-	show_damage_number(damage)
+func apply_hit(damage: int, hp_after: int, front_blocked: bool = false, crit: bool = false) -> void:
+	show_damage_number(damage, crit)
 	await flash_hit()
 	var will_die := hp > 0 and hp_after <= 0 and not is_dead
 	set_hp(hp_after, false)
@@ -571,8 +571,11 @@ func animate_move_to(world_pos: Vector3, with_sfx: bool = false, stop_at_end: bo
 			_play_idle()
 
 
-func show_damage_number(damage: int) -> void:
-	_float_label("-%d" % damage, Color(1.0, 0.35, 0.25, 1.0))
+func show_damage_number(damage: int, crit: bool = false) -> void:
+	if crit:
+		_float_label("крит -%d" % damage, Color(1.0, 0.85, 0.2, 1.0))
+	else:
+		_float_label("-%d" % damage, Color(1.0, 0.35, 0.25, 1.0))
 
 
 func show_miss() -> void:

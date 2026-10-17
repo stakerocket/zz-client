@@ -1,19 +1,19 @@
 extends Node
 class_name ZZBattleController
 
-## Defaults until server rules arrive (battle_start / state.rules).
-var move_cost_stand: int = 1
-var move_cost_sit: int = 2
-var shoot_cost: int = 4
-var posture_cost: int = 1
-var medkit_cost: int = 3
-var medkit_heal_min: int = 15
-var medkit_heal_max: int = 30
-var medkit_max: int = 5
-## Max AP pool per turn (from server rules.initial_ap).
-var max_ap: int = 16
-## Max HP (from unit / InitialHP).
-var max_hp: int = 100
+## From server rules only (lobby_state / battle_start / state.rules). Start at 0 until applied.
+var move_cost_stand: int = 0
+var move_cost_sit: int = 0
+var shoot_cost: int = 0
+var posture_cost: int = 0
+var medkit_cost: int = 0
+var medkit_heal_min: int = 0
+var medkit_heal_max: int = 0
+var medkit_max: int = 0
+var reload_cost: int = 0
+## Max AP/HP from player snapshot or ZZLos.compute_* after rules.
+var max_ap: int = 0
+var max_hp: int = 0
 const PROJECTILE_TIME := 0.35
 const ProjectileBoltScript := preload("res://scripts/battle/projectile_bolt.gd")
 const WallBurstScript := preload("res://scripts/battle/wall_burst.gd")
@@ -21,6 +21,7 @@ const WallBurstScript := preload("res://scripts/battle/wall_burst.gd")
 signal ap_changed(value: int)
 signal hp_changed(value: int)
 signal medkits_changed(value: int)
+signal ammo_changed(in_mag: int, reserve: int)
 signal turn_changed(turn: int)
 signal timer_changed(seconds_left: float)
 signal input_lock_changed(locked: bool)
@@ -29,6 +30,7 @@ signal battle_started
 signal battle_ended(winner_id: String)
 signal room_players_changed(nicks: Array)
 signal chat_received(nick: String, text: String, channel: String)
+signal rules_changed
 
 var ws: ZZWSClient
 var grid: ZZGridView
@@ -40,6 +42,10 @@ var input_locked: bool = true
 var local_ap: int = 0
 var local_hp: int = 0
 var local_medkits: int = 5
+## Ammo: server state is source of truth; local queue mirrors like medkits until resolve.
+var local_ammo_in_mag: int = 6
+var local_ammo_reserve: int = 24
+var local_mag_size: int = 6
 var local_pos: Vector2i = Vector2i.ZERO
 var local_posture: String = "stand"
 var action_queue: Array = []
@@ -55,16 +61,24 @@ var _turn_start_pos: Vector2i = Vector2i.ZERO
 var _turn_start_ap: int = 0
 var _turn_start_posture: String = "stand"
 var _turn_start_medkits: int = 5
+var _turn_start_ammo_in_mag: int = 6
+var _turn_start_ammo_reserve: int = 24
 ## Last hover path steps (excluding start), for click-to-queue.
 var _hover_path: Array = []
 var _hover_path_ap: int = 0
 var _hover_affordable_steps: int = 0
 var _end_turn_sent: bool = false
 
-var _colors := {
-	0: Color(0.30, 0.65, 0.95),
-	1: Color(0.95, 0.55, 0.25),
-}
+var _colors := [
+	Color(0.30, 0.65, 0.95),
+	Color(0.95, 0.55, 0.25),
+	Color(0.35, 0.82, 0.45),
+	Color(0.90, 0.35, 0.75),
+	Color(0.95, 0.85, 0.30),
+	Color(0.45, 0.85, 0.90),
+	Color(0.85, 0.45, 0.35),
+	Color(0.65, 0.55, 0.95),
+]
 
 
 func setup(ws_client: ZZWSClient, grid_view: ZZGridView, units: Node3D) -> void:
@@ -160,6 +174,21 @@ func request_medkit() -> void:
 	_emit_history()
 
 
+func request_reload() -> void:
+	if input_locked or not in_battle or _playing_events:
+		return
+	if local_ap < reload_cost:
+		return
+	action_queue.append(ZZProtocol.reload_action())
+	local_ap -= reload_cost
+	var after := _sim_reload_ammo(local_ammo_in_mag, local_ammo_reserve)
+	local_ammo_in_mag = after.x
+	local_ammo_reserve = after.y
+	ap_changed.emit(local_ap)
+	ammo_changed.emit(local_ammo_in_mag, local_ammo_reserve)
+	_emit_history()
+
+
 func request_undo() -> void:
 	if input_locked or not in_battle or _playing_events:
 		return
@@ -212,6 +241,7 @@ func _on_message(data: Dictionary) -> void:
 	var t: String = str(data.get("type", ""))
 	match t:
 		"lobby_state":
+			_apply_combat_rules(data.get("rules", {}))
 			room_players_changed.emit(data.get("players", []))
 		"chat":
 			var ch := str(data.get("channel", "lobby"))
@@ -252,12 +282,26 @@ func _pump_resolve_queue() -> void:
 func _run_resolve(item: Dictionary) -> void:
 	var data: Dictionary = item.get("data", {})
 	var kind: String = str(item.get("kind", "state"))
+	var events: Array = _as_array(data.get("events", []))
+	var incoming_turn := int(data.get("turn", current_turn))
+	# Mid-join / disconnect roster sync: same turn, no events — keep local plan.
+	var sync_only := (
+		kind == "state"
+		and in_battle
+		and events.is_empty()
+		and incoming_turn == current_turn
+	)
+	if sync_only:
+		_apply_state(data.get("state", {}), false, false)
+		_emit_room_nicks_from_state(data.get("state", {}))
+		_playing_events = false
+		return
 	if kind == "state":
 		turn_deadline_ms = int(data.get("turn_deadline_ms", 30000))
 		if data.has("turn"):
-			current_turn = int(data.get("turn"))
+			current_turn = incoming_turn
 			turn_changed.emit(current_turn)
-	await _play_events(data.get("events", []))
+	await _play_events(events)
 	if kind == "end":
 		in_battle = false
 		_apply_state(data.get("state", {}), false, false)
@@ -291,24 +335,119 @@ func _apply_combat_rules(rules: Variant) -> void:
 	if r.is_empty():
 		return
 	ZZLos.apply_rules(r)
-	move_cost_stand = ZZLos.rule_i("move_ap_stand", move_cost_stand)
-	move_cost_sit = ZZLos.rule_i("move_ap_sit", move_cost_sit)
-	shoot_cost = ZZLos.rule_i("shoot_ap", shoot_cost)
-	posture_cost = ZZLos.rule_i("posture_ap", posture_cost)
-	medkit_cost = ZZLos.rule_i("medkit_ap", medkit_cost)
-	medkit_heal_min = ZZLos.rule_i("medkit_heal_min", medkit_heal_min)
-	medkit_heal_max = ZZLos.rule_i("medkit_heal_max", medkit_heal_max)
+	move_cost_stand = ZZLos.rule_i("move_ap_stand")
+	move_cost_sit = ZZLos.rule_i("move_ap_sit")
+	shoot_cost = ZZLos.rule_i("shoot_ap")
+	posture_cost = ZZLos.rule_i("posture_ap")
+	medkit_cost = ZZLos.rule_i("medkit_ap")
+	medkit_heal_min = ZZLos.rule_i("medkit_heal_min")
+	medkit_heal_max = ZZLos.rule_i("medkit_heal_max")
 	if medkit_heal_max < medkit_heal_min:
 		medkit_heal_max = medkit_heal_min
-	medkit_max = ZZLos.rule_i("medkit_max", medkit_max)
-	max_ap = maxi(1, ZZLos.rule_i("initial_ap", max_ap))
+	medkit_max = ZZLos.rule_i("medkit_max")
+	reload_cost = ZZLos.rule_i("weapon_reload_ap")
+	var mag := ZZLos.rule_i("weapon_mag_size")
+	if mag > 0:
+		local_mag_size = mag
+	if max_ap <= 0:
+		max_ap = ZZLos.compute_max_ap()
+	if max_hp <= 0:
+		max_hp = ZZLos.compute_max_hp()
+	rules_changed.emit()
 
 
 func _apply_local_weapon(pd: Dictionary) -> void:
 	if not pd.has("weapon"):
 		return
-	ZZLos.apply_weapon(pd.get("weapon"))
-	shoot_cost = ZZLos.rule_i("shoot_ap", shoot_cost)
+	var w: Variant = pd.get("weapon")
+	ZZLos.apply_weapon(w)
+	shoot_cost = ZZLos.rule_i("shoot_ap")
+	reload_cost = ZZLos.rule_i("weapon_reload_ap")
+	if typeof(w) == TYPE_DICTIONARY:
+		_set_ammo_from_weapon(w)
+
+
+func _player_stat(pd: Dictionary, key: String) -> int:
+	var fallback := ZZLos.default_stat()
+	var st: Variant = pd.get("stats", {})
+	if typeof(st) != TYPE_DICTIONARY:
+		return fallback
+	return int(st.get(key, fallback))
+
+
+func _evaluate_shot_at(from: Vector2i, shooter_posture: String, target_pd: Dictionary) -> Dictionary:
+	var tgt_posture := str(target_pd.get("posture", "stand"))
+	if tgt_posture == "":
+		tgt_posture = "stand"
+	var self_pd: Dictionary = players.get(your_id, {})
+	return ZZLos.evaluate_shot(
+		grid.walls_dict(),
+		from.x, from.y,
+		int(target_pd.get("x", 0)), int(target_pd.get("y", 0)),
+		shooter_posture,
+		tgt_posture,
+		_player_stat(self_pd, "accuracy"),
+		_player_stat(target_pd, "agility")
+	)
+
+
+func _set_ammo_from_weapon(w: Dictionary) -> void:
+	if w.has("mag_size"):
+		local_mag_size = maxi(1, int(w.get("mag_size", local_mag_size)))
+	local_ammo_in_mag = int(w.get("ammo_in_mag", local_ammo_in_mag))
+	local_ammo_reserve = int(w.get("ammo_reserve", local_ammo_reserve))
+	_turn_start_ammo_in_mag = local_ammo_in_mag
+	_turn_start_ammo_reserve = local_ammo_reserve
+	ammo_changed.emit(local_ammo_in_mag, local_ammo_reserve)
+
+
+func _apply_ammo_after_event(actor_id: String, e: Dictionary) -> void:
+	# Always prefer event fields when present (0 is valid).
+	if not e.has("ammo_in_mag_after"):
+		return
+	var in_mag := int(e.get("ammo_in_mag_after", 0))
+	var reserve := int(e.get("ammo_reserve_after", local_ammo_reserve if actor_id == your_id else 0))
+	if players.has(actor_id):
+		var pd: Dictionary = players[actor_id]
+		var w: Variant = pd.get("weapon", {})
+		if typeof(w) != TYPE_DICTIONARY:
+			w = {}
+		w["ammo_in_mag"] = in_mag
+		w["ammo_reserve"] = reserve
+		pd["weapon"] = w
+		players[actor_id] = pd
+	if actor_id == your_id:
+		local_ammo_in_mag = in_mag
+		local_ammo_reserve = reserve
+		_turn_start_ammo_in_mag = in_mag
+		_turn_start_ammo_reserve = reserve
+		ammo_changed.emit(local_ammo_in_mag, local_ammo_reserve)
+
+
+func _sim_reload_ammo(in_mag: int, reserve: int) -> Vector2i:
+	var need := local_mag_size - in_mag
+	if need > 0 and reserve > 0:
+		var take: int = mini(need, reserve)
+		in_mag += take
+		reserve -= take
+	return Vector2i(in_mag, reserve)
+
+
+func _refresh_unit_outlines() -> void:
+	if grid == null:
+		return
+	var enemies: Array = []
+	for pid in players.keys():
+		if str(pid) == your_id:
+			continue
+		var pd: Dictionary = players[pid]
+		if int(pd.get("hp", 0)) <= 0:
+			continue
+		enemies.append(Vector2i(int(pd.get("x", -1)), int(pd.get("y", -1))))
+	var own := local_pos
+	if your_id != "" and players.has(your_id) and int(players[your_id].get("hp", 0)) <= 0:
+		own = Vector2i(-1, -1)
+	grid.set_unit_outlines(own, enemies)
 
 
 func _play_events(events: Variant) -> void:
@@ -416,10 +555,18 @@ func _play_one_event(e: Dictionary, groups: Array = [], gi: int = 0) -> void:
 			await _play_posture_event(e)
 		"medkit":
 			await _play_medkit_event(e)
+		"reload":
+			await _play_reload_event(e)
 		"shoot":
 			await _play_shoot_event(e)
 		_:
 			pass
+
+
+func _play_reload_event(e: Dictionary) -> void:
+	var actor_id := str(e.get("actor_id", ""))
+	_apply_ammo_after_event(actor_id, e)
+	await get_tree().create_timer(0.25).timeout
 
 
 func _play_medkit_event(e: Dictionary) -> void:
@@ -476,6 +623,7 @@ func _play_move_chain(events: Array) -> void:
 			players[actor_id]["y"] = to.y
 		if actor_id == your_id:
 			local_pos = to
+	_refresh_unit_outlines()
 
 
 func _play_move_event(e: Dictionary, stop_at_end: bool = true) -> void:
@@ -495,11 +643,13 @@ func _play_move_event(e: Dictionary, stop_at_end: bool = true) -> void:
 		players[actor_id]["y"] = to.y
 	if actor_id == your_id:
 		local_pos = to
+	_refresh_unit_outlines()
 
 
 func _play_shoot_event(e: Dictionary) -> void:
 	var actor_id := str(e.get("actor_id", ""))
 	var target_id := str(e.get("target_id", ""))
+	_apply_ammo_after_event(actor_id, e)
 	var actor: ZZUnitView = unit_nodes.get(actor_id)
 	if actor == null or not is_instance_valid(actor):
 		return
@@ -520,9 +670,10 @@ func _play_shoot_event(e: Dictionary) -> void:
 		return
 	var damage := int(e.get("damage", 0))
 	var hp_after := int(e.get("hp_after", 0))
+	var crit := bool(e.get("crit", false))
 	if damage > 0:
 		Sfx.play_hit_target()
-		await target.apply_hit(damage, hp_after, _is_death_front_blocked(target_id, target))
+		await target.apply_hit(damage, hp_after, _is_death_front_blocked(target_id, target), crit)
 	else:
 		Sfx.play_miss()
 		await target.apply_miss()
@@ -702,15 +853,19 @@ func _apply_state(state: Variant, reset_queue: bool, snap_positions: bool) -> vo
 		_emit_history()
 	players.clear()
 	var list: Array = st.get("players", [])
+	var seen: Dictionary = {}
 	var idx := 0
 	for p in list:
 		if typeof(p) != TYPE_DICTIONARY:
 			continue
 		var pd: Dictionary = p
 		var pid := str(pd.get("id", ""))
+		seen[pid] = true
 		players[pid] = pd
 		_ensure_unit(pid, str(pd.get("nick", "?")), idx)
 		var uv: ZZUnitView = unit_nodes[pid]
+		if pd.has("max_hp"):
+			uv.set_max_hp(maxi(1, int(pd.get("max_hp", 100))))
 		var hp_val := int(pd.get("hp", 0))
 		if uv.is_dead or uv.is_dying:
 			uv.set_hp(hp_val, false)
@@ -726,9 +881,15 @@ func _apply_state(state: Variant, reset_queue: bool, snap_positions: bool) -> vo
 			uv.snap_to(grid.grid_to_world(gx, gy))
 		if pid == your_id:
 			local_ap = int(pd.get("ap", 0))
+			if pd.has("max_ap"):
+				max_ap = maxi(1, int(pd.get("max_ap", max_ap)))
 			local_hp = hp_val
 			local_medkits = int(pd.get("medkits", medkit_max))
-			max_hp = maxi(uv.max_hp, local_hp)
+			if pd.has("max_hp"):
+				max_hp = maxi(1, int(pd.get("max_hp", max_hp)))
+				uv.set_max_hp(max_hp)
+			else:
+				max_hp = maxi(uv.max_hp, local_hp)
 			local_pos = Vector2i(gx, gy)
 			local_posture = posture
 			_turn_start_pos = local_pos
@@ -740,8 +901,14 @@ func _apply_state(state: Variant, reset_queue: bool, snap_positions: bool) -> vo
 			hp_changed.emit(local_hp)
 			medkits_changed.emit(local_medkits)
 		idx += 1
-	if grid != null:
-		grid.clear_unit_outlines()
+	for pid in unit_nodes.keys():
+		if seen.has(pid):
+			continue
+		var orphan: Node = unit_nodes[pid]
+		unit_nodes.erase(pid)
+		if is_instance_valid(orphan):
+			orphan.queue_free()
+	_refresh_unit_outlines()
 
 
 func _rewind_local_to_turn_start() -> void:
@@ -784,7 +951,8 @@ func _ensure_unit(pid: String, nick: String, idx: int) -> void:
 		return
 	var uv := ZZUnitView.new()
 	units_root.add_child(uv)
-	uv.setup(pid, nick, _colors.get(idx % 2, Color.WHITE))
+	var color: Color = _colors[idx % _colors.size()]
+	uv.setup(pid, nick, color)
 	unit_nodes[pid] = uv
 
 
@@ -853,16 +1021,7 @@ func _try_show_enemy_aim(g: Vector2i) -> bool:
 	if uv == null or not is_instance_valid(uv):
 		return true
 	var pd2: Dictionary = players.get(target_id, {})
-	var tgt_posture := str(pd2.get("posture", "stand"))
-	if tgt_posture == "":
-		tgt_posture = "stand"
-	var outcome := ZZLos.evaluate_shot(
-		grid.walls_dict(),
-		local_pos.x, local_pos.y,
-		int(pd2.get("x", 0)), int(pd2.get("y", 0)),
-		local_posture,
-		tgt_posture
-	)
+	var outcome := _evaluate_shot_at(local_pos, local_posture, pd2)
 	var blocked := bool(outcome.get("blocked", false))
 	var can_shoot := ZZLos.can_shoot_from(local_posture) and local_ap >= shoot_cost and not blocked
 	uv.set_aim_preview({
@@ -1004,6 +1163,7 @@ func _queue_path_or_move(g: Vector2i) -> void:
 		return
 	ap_changed.emit(local_ap)
 	grid.set_highlight(local_pos)
+	_refresh_unit_outlines()
 	_emit_history()
 	_clear_hover_path()
 	if unit_nodes.has(your_id):
@@ -1023,20 +1183,19 @@ func _animate_local_path(cells: Array) -> void:
 func _queue_shoot(target_id: String) -> void:
 	if local_ap < shoot_cost:
 		return
+	if local_ammo_in_mag <= 0:
+		return
 	if not ZZLos.can_shoot_from(local_posture):
 		return
 	var pd: Dictionary = players.get(target_id, {})
 	var tx := int(pd.get("x", 0))
 	var ty := int(pd.get("y", 0))
-	var tgt_posture := str(pd.get("posture", "stand"))
-	if tgt_posture == "":
-		tgt_posture = "stand"
-	var outcome := ZZLos.evaluate_shot(
-		grid.walls_dict(), local_pos.x, local_pos.y, tx, ty, local_posture, tgt_posture
-	)
+	var outcome := _evaluate_shot_at(local_pos, local_posture, pd)
 	action_queue.append(ZZProtocol.shoot_action(target_id))
 	local_ap -= shoot_cost
+	local_ammo_in_mag = maxi(0, local_ammo_in_mag - 1)
 	ap_changed.emit(local_ap)
+	ammo_changed.emit(local_ammo_in_mag, local_ammo_reserve)
 	_emit_history()
 	_preview_shoot(target_id, outcome)
 
@@ -1054,6 +1213,8 @@ func _recompute_local_from_queue() -> void:
 	local_ap = _turn_start_ap
 	local_posture = _turn_start_posture
 	local_medkits = _turn_start_medkits
+	local_ammo_in_mag = _turn_start_ammo_in_mag
+	local_ammo_reserve = _turn_start_ammo_reserve
 	if unit_nodes.has(your_id):
 		var uv: ZZUnitView = unit_nodes[your_id]
 		if uv != null and is_instance_valid(uv) and not uv.is_dead:
@@ -1070,12 +1231,18 @@ func _recompute_local_from_queue() -> void:
 				local_ap -= mcost
 			"shoot":
 				local_ap -= shoot_cost
+				local_ammo_in_mag = maxi(0, local_ammo_in_mag - 1)
 			"posture":
 				local_posture = str(act.get("posture", "stand"))
 				local_ap -= posture_cost
 			"medkit":
 				local_ap -= medkit_cost
 				local_medkits = maxi(0, local_medkits - 1)
+			"reload":
+				local_ap -= reload_cost
+				var after := _sim_reload_ammo(local_ammo_in_mag, local_ammo_reserve)
+				local_ammo_in_mag = after.x
+				local_ammo_reserve = after.y
 	if unit_nodes.has(your_id):
 		var uv2: ZZUnitView = unit_nodes[your_id]
 		if uv2 != null and is_instance_valid(uv2) and not uv2.is_dead:
@@ -1086,6 +1253,8 @@ func _recompute_local_from_queue() -> void:
 	_clear_hover_path()
 	ap_changed.emit(local_ap)
 	medkits_changed.emit(local_medkits)
+	ammo_changed.emit(local_ammo_in_mag, local_ammo_reserve)
+	_refresh_unit_outlines()
 	_emit_history()
 	# Re-preview last shoot if present.
 	if not action_queue.is_empty():
@@ -1093,13 +1262,7 @@ func _recompute_local_from_queue() -> void:
 		if str(last.get("type", "")) == "shoot":
 			var tid := str(last.get("target_id", ""))
 			var tpd: Dictionary = players.get(tid, {})
-			var outcome := ZZLos.evaluate_shot(
-				grid.walls_dict(),
-				local_pos.x, local_pos.y,
-				int(tpd.get("x", 0)), int(tpd.get("y", 0)),
-				local_posture,
-				str(tpd.get("posture", "stand"))
-			)
+			var outcome := _evaluate_shot_at(local_pos, local_posture, tpd)
 			_preview_shoot(tid, outcome)
 
 
@@ -1137,13 +1300,7 @@ func _emit_history() -> void:
 				var tid := str(act.get("target_id", ""))
 				var nick := str(players.get(tid, {}).get("nick", tid))
 				var tpd: Dictionary = players.get(tid, {})
-				var outcome := ZZLos.evaluate_shot(
-					grid.walls_dict(),
-					sim_pos.x, sim_pos.y,
-					int(tpd.get("x", 0)), int(tpd.get("y", 0)),
-					sim_posture,
-					str(tpd.get("posture", "stand"))
-				)
+				var outcome := _evaluate_shot_at(sim_pos, sim_posture, tpd)
 				if bool(outcome.get("blocked", false)):
 					lines.append("Выстрел → %s (блок)" % nick)
 				else:
@@ -1165,5 +1322,10 @@ func _emit_history() -> void:
 				move_run = 0
 				move_ap = 0
 				lines.append("Аптечка (+%d–%d ХП) · %d ОД" % [medkit_heal_min, medkit_heal_max, medkit_cost])
+			"reload":
+				_flush_move_history(lines, move_run, move_end, move_ap)
+				move_run = 0
+				move_ap = 0
+				lines.append("Перезарядка · %d ОД" % reload_cost)
 	_flush_move_history(lines, move_run, move_end, move_ap)
 	history_changed.emit(lines)

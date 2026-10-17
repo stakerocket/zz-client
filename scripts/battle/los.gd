@@ -2,39 +2,10 @@ extends RefCounted
 class_name ZZLos
 
 ## Offset col/row math matching server (pointy-top odd-r).
-## Hit / AP / weapon numbers come from server `rules` (battle_start / state.rules).
+## All balance numbers come from server `rules` (lobby_state / battle_start / state.rules).
+## No balance hardcoding — empty until apply_rules().
 
-# Fallback defaults — overwritten by apply_rules() from server.
-# chance = accuracy + skill*mod - dist_penalty + pose_bonus - defense (clamp 0..hit_chance_cap)
-static var _rules: Dictionary = {
-	"shooter_skill": 1.0,
-	"shooter_skill_mod": 0.5,
-	"hit_chance_cap": 0.95,
-	"hit_pose_bonus_stand": 0.0,
-	"hit_pose_bonus_sit": 0.15,
-	"def_stand_open": 0.0,
-	"def_stand_half": 0.20,
-	"def_stand_window": 0.20,
-	"def_sit_open": 0.15,
-	"def_sit_half": 0.40,
-	"def_sit_window": 0.40,
-	"def_cover_open": 0.60,
-	"initial_ap": 16,
-	"move_ap_stand": 1,
-	"move_ap_sit": 2,
-	"posture_ap": 1,
-	"medkit_ap": 3,
-	"medkit_heal_min": 15,
-	"medkit_heal_max": 30,
-	"medkit_max": 5,
-	"shoot_ap": 4,
-	"weapon_range": 16,
-	"weapon_accuracy": 0.40,
-	"damage_min": 16,
-	"damage_max": 24,
-	"range_over_hit_per_hex": 0.05,
-	"range_over_damage_per_hex": 0.1,
-}
+static var _rules: Dictionary = {}
 
 # even row / odd row neighbor deltas — must match server oddrNeighborDirs.
 const NEIGHBOR_DIRS := [
@@ -59,31 +30,72 @@ static func apply_weapon(w: Variant) -> void:
 		return
 	var wd: Dictionary = w
 	if wd.has("shoot_ap"):
-		_rules["shoot_ap"] = int(wd.get("shoot_ap", 4))
+		_rules["shoot_ap"] = int(wd["shoot_ap"])
 	if wd.has("range"):
-		_rules["weapon_range"] = int(wd.get("range", 16))
+		_rules["weapon_range"] = int(wd["range"])
 	if wd.has("damage_min"):
-		_rules["damage_min"] = int(wd.get("damage_min", 16))
+		_rules["damage_min"] = int(wd["damage_min"])
 	if wd.has("damage_max"):
-		_rules["damage_max"] = int(wd.get("damage_max", 24))
+		_rules["damage_max"] = int(wd["damage_max"])
 	if wd.has("accuracy"):
-		_rules["weapon_accuracy"] = float(wd.get("accuracy", 0.40))
+		_rules["weapon_accuracy"] = float(wd["accuracy"])
+	if wd.has("mag_size"):
+		_rules["weapon_mag_size"] = int(wd["mag_size"])
+	if wd.has("reload_ap"):
+		_rules["weapon_reload_ap"] = int(wd["reload_ap"])
 
 
 static func rules() -> Dictionary:
 	return _rules
 
 
-static func rule_f(key: String, fallback: float) -> float:
-	return float(_rules.get(key, fallback))
+static func has_rules() -> bool:
+	return not _rules.is_empty()
 
 
-static func rule_i(key: String, fallback: int) -> int:
-	return int(_rules.get(key, fallback))
+static func rule_f(key: String) -> float:
+	return float(_rules.get(key, 0.0))
+
+
+static func rule_i(key: String) -> int:
+	return int(_rules.get(key, 0))
+
+
+static func default_stat() -> int:
+	return rule_i("default_stat")
+
+
+static func compute_max_hp(endurance: int = -1) -> int:
+	if endurance < 0:
+		endurance = default_stat()
+	var hp := rule_i("hp_base") + rule_i("hp_per_endurance") * endurance
+	return maxi(1, hp)
+
+
+static func compute_max_ap(strength: int = -1, agility: int = -1, endurance: int = -1) -> int:
+	var d := default_stat()
+	if strength < 0:
+		strength = d
+	if agility < 0:
+		agility = d
+	if endurance < 0:
+		endurance = d
+	var raw := (
+		rule_f("ap_from_strength") * float(strength)
+		+ rule_f("ap_from_agility") * float(agility)
+		+ rule_f("ap_from_endurance") * float(endurance)
+	)
+	return maxi(0, int(floor(raw)))
+
+
+static func compute_carry_weight(strength: int = -1) -> int:
+	if strength < 0:
+		strength = default_stat()
+	return rule_i("carry_weight_base") + rule_i("carry_weight_per_strength") * strength
 
 
 static func weapon_range() -> int:
-	return rule_i("weapon_range", 16)
+	return rule_i("weapon_range")
 
 
 static func range_hit_penalty(distance: int) -> float:
@@ -92,7 +104,7 @@ static func range_hit_penalty(distance: int) -> float:
 		return 1.0
 	if distance <= wr:
 		return 0.0
-	return rule_f("range_over_hit_per_hex", 0.05) * float(distance - wr)
+	return rule_f("range_over_hit_per_hex") * float(distance - wr)
 
 
 static func wall_key(x: int, y: int) -> String:
@@ -192,15 +204,22 @@ static func first_wall_on_shot(walls: Dictionary, x0: int, y0: int, x1: int, y1:
 	return Vector2i(int(o.x), int(o.y))
 
 
-## Mirrors server EvaluateShot (additive formula).
-## Returns {blocked, chance, wall, soft, distance}. Shooting always allowed at any d >= 1.
+## Mirrors server EvaluateShot. Stats/coeffs only from applied rules + args.
+## Returns {blocked, chance, wall, soft, distance}.
 static func evaluate_shot(
 	walls: Dictionary,
 	x0: int, y0: int, x1: int, y1: int,
 	shooter_posture: String,
-	target_posture: String
+	target_posture: String,
+	shooter_marksmanship: int = -1,
+	target_agility: int = -1
 ) -> Dictionary:
 	var dist := hex_distance(x0, y0, x1, y1)
+	var dstat := default_stat()
+	if shooter_marksmanship < 0:
+		shooter_marksmanship = dstat
+	if target_agility < 0:
+		target_agility = dstat
 
 	var obs := obstacles_on_shot(walls, x0, y0, x1, y1)
 	for o in obs:
@@ -212,7 +231,6 @@ static func evaluate_shot(
 				"soft": false,
 				"distance": dist,
 			}
-	# half/window next to shooter only (not next to target) do not count.
 	var path_obs: Array = []
 	for o in obs:
 		var kind := str(o.kind)
@@ -246,15 +264,19 @@ static func evaluate_shot(
 	if not has_soft:
 		defense = _open_defense(target_posture)
 
-	var pose := rule_f("hit_pose_bonus_sit", 0.15) if shooter_posture == "sit" else rule_f("hit_pose_bonus_stand", 0.0)
+	var pose := rule_f("hit_pose_bonus_sit") if shooter_posture == "sit" else rule_f("hit_pose_bonus_stand")
+	var mark := float(maxi(0, shooter_marksmanship)) * rule_f("hit_per_accuracy_stat")
+	var dodge := float(maxi(0, target_agility)) * rule_f("dodge_per_agility")
 	var chance := (
-		rule_f("weapon_accuracy", 0.40)
-		+ rule_f("shooter_skill", 1.0) * rule_f("shooter_skill_mod", 0.5)
+		rule_f("weapon_accuracy")
+		+ rule_f("shooter_skill") * rule_f("shooter_skill_mod")
 		- range_hit_penalty(dist)
 		+ pose
 		- defense
+		+ mark
+		- dodge
 	)
-	chance = clampf(chance, 0.0, rule_f("hit_chance_cap", 0.95))
+	chance = clampf(chance, 0.0, rule_f("hit_chance_cap"))
 	return {
 		"blocked": false,
 		"chance": chance,
@@ -266,18 +288,18 @@ static func evaluate_shot(
 
 static func _open_defense(target_posture: String) -> float:
 	if target_posture == "cover":
-		return rule_f("def_cover_open", 0.60)
+		return rule_f("def_cover_open")
 	if target_posture == "sit":
-		return rule_f("def_sit_open", 0.15)
-	return rule_f("def_stand_open", 0.0)
+		return rule_f("def_sit_open")
+	return rule_f("def_stand_open")
 
 
 static func _soft_defense(target_posture: String, kind: String) -> float:
 	if target_posture == "sit":
-		return rule_f("def_sit_window", 0.40) if kind == "window" else rule_f("def_sit_half", 0.40)
+		return rule_f("def_sit_window") if kind == "window" else rule_f("def_sit_half")
 	if kind == "window":
-		return rule_f("def_stand_window", 0.20)
-	return rule_f("def_stand_half", 0.20)
+		return rule_f("def_stand_window")
+	return rule_f("def_stand_half")
 
 
 static func can_shoot_from(posture: String) -> bool:

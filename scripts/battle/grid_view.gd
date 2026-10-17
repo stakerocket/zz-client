@@ -213,9 +213,10 @@ func set_highlight(pos: Vector2i) -> void:
 	_rebuild_overlay()
 
 
-## Unit hex pads/outlines disabled — map shows path/aim only.
-func set_unit_outlines(_own: Vector2i, _enemies: Array) -> void:
-	clear_unit_outlines()
+func set_unit_outlines(own: Vector2i, enemies: Array) -> void:
+	_own_cell = own
+	_enemy_cells = enemies.duplicate()
+	_rebuild_unit_outlines()
 
 
 func clear_unit_outlines() -> void:
