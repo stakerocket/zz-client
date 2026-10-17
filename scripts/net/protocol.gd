@@ -40,3 +40,7 @@ static func medkit_action() -> Dictionary:
 
 static func reload_action() -> Dictionary:
 	return {"type": "reload"}
+
+
+static func switch_weapon_action(weapon_index: int) -> Dictionary:
+	return {"type": "switch_weapon", "weapon_index": int(weapon_index)}

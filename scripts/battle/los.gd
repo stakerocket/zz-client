@@ -6,6 +6,7 @@ class_name ZZLos
 ## No balance hardcoding — empty until apply_rules().
 
 static var _rules: Dictionary = {}
+static var _item_catalog: Dictionary = {} # { items: [], default_loadout: [], by_id: {} }
 
 # even row / odd row neighbor deltas — must match server oddrNeighborDirs.
 const NEIGHBOR_DIRS := [
@@ -43,6 +44,90 @@ static func apply_weapon(w: Variant) -> void:
 		_rules["weapon_mag_size"] = int(wd["mag_size"])
 	if wd.has("reload_ap"):
 		_rules["weapon_reload_ap"] = int(wd["reload_ap"])
+
+
+static func apply_item_catalog(raw: Variant) -> void:
+	if typeof(raw) != TYPE_DICTIONARY:
+		return
+	var cat: Dictionary = raw
+	if cat.is_empty():
+		return
+	var by_id: Dictionary = {}
+	var items: Array = cat.get("items", [])
+	for it in items:
+		if typeof(it) != TYPE_DICTIONARY:
+			continue
+		var id := str(it.get("id", ""))
+		if id != "":
+			by_id[id] = it
+	_item_catalog = {
+		"items": items,
+		"default_loadout": cat.get("default_loadout", []),
+		"by_id": by_id,
+	}
+	# Prefer catalog weapon params for aim / costs when present.
+	var rifle: Variant = by_id.get("rifle", null)
+	if typeof(rifle) == TYPE_DICTIONARY:
+		var params: Variant = rifle.get("params", {})
+		if typeof(params) == TYPE_DICTIONARY:
+			apply_weapon({
+				"shoot_ap": params.get("shoot_ap", 0),
+				"range": params.get("range", 0),
+				"damage_min": params.get("damage_min", 0),
+				"damage_max": params.get("damage_max", 0),
+				"accuracy": params.get("accuracy", 0.0),
+				"mag_size": params.get("mag_size", 0),
+				"reload_ap": params.get("reload_ap", 0),
+			})
+	var med: Variant = by_id.get("medkit", null)
+	if typeof(med) == TYPE_DICTIONARY:
+		var mp: Variant = med.get("params", {})
+		if typeof(mp) == TYPE_DICTIONARY:
+			if mp.has("use_ap"):
+				_rules["medkit_ap"] = int(mp["use_ap"])
+			if mp.has("heal_min"):
+				_rules["medkit_heal_min"] = int(mp["heal_min"])
+			if mp.has("heal_max"):
+				_rules["medkit_heal_max"] = int(mp["heal_max"])
+
+
+static func has_item_catalog() -> bool:
+	return not _item_catalog.is_empty()
+
+
+static func item_def(item_id: String) -> Dictionary:
+	var by_id: Dictionary = _item_catalog.get("by_id", {})
+	var d: Variant = by_id.get(item_id, {})
+	return d if typeof(d) == TYPE_DICTIONARY else {}
+
+
+static func compute_loadout_weight() -> float:
+	if not has_item_catalog():
+		return 0.0
+	var sum := 0.0
+	var loadout: Array = _item_catalog.get("default_loadout", [])
+	for e in loadout:
+		if typeof(e) != TYPE_DICTIONARY:
+			continue
+		var id := str(e.get("item_id", ""))
+		var qty := int(e.get("qty", 0))
+		var def := item_def(id)
+		if def.is_empty() or qty <= 0:
+			continue
+		sum += float(def.get("weight", 0.0)) * float(qty)
+	return sum
+
+
+static func compute_effective_max_ap(strength: int = -1, agility: int = -1, endurance: int = -1) -> int:
+	var max_ap := compute_max_ap(strength, agility, endurance)
+	var carry := float(compute_carry_weight(strength if strength >= 0 else default_stat()))
+	var inv_w := compute_loadout_weight()
+	if inv_w <= carry:
+		return max_ap
+	var frac := rule_f("overweight_ap_frac")
+	if frac <= 0.0:
+		frac = 0.2
+	return maxi(0, int(floor(float(max_ap) * frac)))
 
 
 static func rules() -> Dictionary:
@@ -267,6 +352,8 @@ static func evaluate_shot(
 	var pose := rule_f("hit_pose_bonus_sit") if shooter_posture == "sit" else rule_f("hit_pose_bonus_stand")
 	var mark := float(maxi(0, shooter_marksmanship)) * rule_f("hit_per_accuracy_stat")
 	var dodge := float(maxi(0, target_agility)) * rule_f("dodge_per_agility")
+	if target_posture == "run":
+		dodge += rule_f("hit_pose_dodge_run")
 	var chance := (
 		rule_f("weapon_accuracy")
 		+ rule_f("shooter_skill") * rule_f("shooter_skill_mod")
@@ -303,4 +390,5 @@ static func _soft_defense(target_posture: String, kind: String) -> float:
 
 
 static func can_shoot_from(posture: String) -> bool:
+	# Match server: run is reposition-only.
 	return posture == "stand" or posture == "sit"

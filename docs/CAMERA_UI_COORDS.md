@@ -17,7 +17,7 @@ Stretch: `canvas_items` + design **1280×720** (`aspect=ignore`).
 
 Файл: [`scripts/main.gd`](../scripts/main.gd).
 
-1. **Верх чата** — из `get_global_rect()` у `chat_dock` / `bottom_bar` (и окно, и fullscreen).
+1. **Верх чата** — из `get_global_rect()` у `chat_dock` / `plan_dock` (и окно, и fullscreen).
 2. **В coords камеры** — `_ui_to_viewport()` = `get_viewport().get_canvas_transform().affine_inverse() * ui_pos`.
 3. **Упоры сдвига** (`_clamp_focus`), зум не трогать (`ORTHO_SIZE_MIN = 22`):
    - **Вниз:** void низ карты ↔ чат ≤ `CHAT_PAD_PX` (2).

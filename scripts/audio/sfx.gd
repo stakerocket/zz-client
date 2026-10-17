@@ -9,12 +9,14 @@ const _FILES := {
 	"hit_target": "res://assets/sfx/hit_target.wav",
 	"hit_wall": "res://assets/sfx/hit_wall.wav",
 	"miss": "res://assets/sfx/miss.wav",
+	"death": "res://assets/sfx/death.wav",
 }
 
-const POOL_SIZE := 8
+const POOL_SIZE := 12
 
 var _streams: Dictionary = {}
 var _pool: Array = []
+var _walk_player: AudioStreamPlayer
 
 
 func _ready() -> void:
@@ -25,14 +27,24 @@ func _ready() -> void:
 		p.bus = "Master"
 		add_child(p)
 		_pool.append(p)
+	_walk_player = AudioStreamPlayer.new()
+	_walk_player.bus = "Master"
+	add_child(_walk_player)
 
 
 func play_shoot() -> void:
-	play("shoot", -2.0)
+	play("shoot", -0.5, randf_range(0.98, 1.02))
 
 
 func play_walk() -> void:
-	play("walk", -6.0, randf_range(0.92, 1.08))
+	# Dedicated player so footsteps aren't stolen by combat one-shots.
+	var stream: AudioStream = _streams.get("walk") as AudioStream
+	if stream == null or _walk_player == null:
+		return
+	_walk_player.stream = stream
+	_walk_player.volume_db = -5.0
+	_walk_player.pitch_scale = randf_range(0.90, 1.12)
+	_walk_player.play()
 
 
 func play_hit_target() -> void:
@@ -45,6 +57,10 @@ func play_hit_wall() -> void:
 
 func play_miss() -> void:
 	play("miss", -4.0, randf_range(0.95, 1.05))
+
+
+func play_death() -> void:
+	play("death", -1.5, randf_range(0.96, 1.04))
 
 
 func play(key: String, volume_db: float = 0.0, pitch: float = 1.0) -> void:
@@ -65,6 +81,7 @@ func _acquire() -> AudioStreamPlayer:
 		var player: AudioStreamPlayer = p
 		if not player.playing:
 			return player
+	# Prefer an idle slot; if all busy, steal the oldest pool slot (not walk).
 	if _pool.is_empty():
 		return null
 	return _pool[0] as AudioStreamPlayer

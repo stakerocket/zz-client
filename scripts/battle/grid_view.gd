@@ -30,7 +30,6 @@ var _walls_root: Node3D
 var _ground: MeshInstance3D
 var _aim_mesh: MeshInstance3D
 var _path_label: Label3D
-var _mat_pad: StandardMaterial3D
 var _mat_path_ok: StandardMaterial3D
 var _mat_path_over: StandardMaterial3D
 var _mat_hl: StandardMaterial3D
@@ -343,8 +342,6 @@ func _axial_round(fq: float, fr: float) -> Vector2i:
 
 
 func _build_materials() -> void:
-	_mat_pad = _make_mat(Color(0.40, 0.38, 0.35, 1.0))
-	_mat_pad.roughness = 0.9
 	_mat_ground = _make_mat(Color(0.18, 0.16, 0.14, 1.0))
 	_mat_ground.roughness = 1.0
 	_mat_path_ok = _make_mat(Color(0.45, 0.72, 0.42, 0.78), true)
@@ -483,15 +480,7 @@ func _rebuild_unit_outlines() -> void:
 
 
 func _spawn_unit_pad(pc: Vector2i, outline_mat: StandardMaterial3D) -> void:
-	var base := MeshInstance3D.new()
-	base.mesh = _hex_mesh
-	base.material_override = _mat_pad
-	base.position = Vector3(
-		grid_to_world(pc.x, pc.y).x,
-		0.0,
-		grid_to_world(pc.x, pc.y).z
-	)
-	_outlines_root.add_child(base)
+	# Outline only — do not tint/fill the hex under the unit.
 	var ring := MeshInstance3D.new()
 	ring.mesh = _hex_outline_mesh
 	ring.material_override = outline_mat

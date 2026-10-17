@@ -81,6 +81,12 @@ func _ready() -> void:
 		ui.set_reload_cost(battle.reload_cost)
 		_refresh_consumable_btns()
 	)
+	battle.weapons_changed.connect(func(weapons: Array, active_idx: int):
+		ui.set_weapons(weapons, active_idx, battle.switch_weapon_cost)
+		ui.set_reload_cost(battle.reload_cost)
+		ui.set_shoot_cost(battle.shoot_cost)
+		_refresh_consumable_btns()
+	)
 
 	ui.continue_pressed.connect(_on_continue)
 	ui.find_match_pressed.connect(_on_find_match)
@@ -89,6 +95,7 @@ func _ready() -> void:
 	ui.posture_pressed.connect(battle.request_posture)
 	ui.medkit_pressed.connect(battle.request_medkit)
 	ui.reload_pressed.connect(battle.request_reload)
+	ui.weapon_slot_pressed.connect(battle.request_weapon_slot)
 	ui.chat_submitted.connect(func(text: String, channel: String):
 		battle.send_chat(text, channel)
 	)
@@ -110,11 +117,11 @@ func _ensure_environment() -> void:
 	if _battle_environment == null:
 		var env := Environment.new()
 		env.background_mode = Environment.BG_COLOR
-		env.background_color = Color(0, 0, 0) # pure black void around hex map
+		# Soft charcoal void — pure black cuts the eye around the map.
+		env.background_color = Color(0.11, 0.10, 0.09)
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 		env.ambient_light_color = Color(0.62, 0.58, 0.52)
 		env.ambient_light_energy = 0.48
-		# No fog — it washed the void to charcoal gray instead of black.
 		env.fog_enabled = false
 		env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 		_battle_environment = env
@@ -173,6 +180,9 @@ func _on_battle_started() -> void:
 	_fit_camera_to_map()
 	ui.show_battle()
 	ui.set_turn(battle.current_turn)
+	ui.set_vital_caps(battle.max_hp, battle.max_ap)
+	ui.set_shoot_cost(battle.shoot_cost)
+	ui.set_mag_size(battle.local_mag_size)
 	ui.set_ap(battle.local_ap)
 	ui.set_hp(battle.local_hp)
 	ui.set_posture(battle.local_posture)
@@ -219,8 +229,8 @@ func _chat_band_top_y() -> float:
 	if ui != null and ui.chat_dock != null and ui.chat_dock.visible:
 		top_ui = minf(top_ui, ui.chat_dock.get_global_rect().position.y)
 		found = true
-	if ui != null and ui.bottom_bar != null and ui.bottom_bar.visible:
-		top_ui = minf(top_ui, ui.bottom_bar.get_global_rect().position.y)
+	if ui != null and ui.plan_dock != null and ui.plan_dock.visible:
+		top_ui = minf(top_ui, ui.plan_dock.get_global_rect().position.y)
 		found = true
 	if not found:
 		return vp.position.y + vp.size.y * (1.0 - CHAT_BOTTOM_FRAC)
@@ -435,12 +445,20 @@ func _clamp_focus() -> void:
 
 func _refresh_consumable_btns() -> void:
 	var can_plan := not battle.input_locked and battle.in_battle
-	ui.set_medkit_enabled(
-		can_plan
-		and battle.local_ap >= battle.medkit_cost
-		and battle.local_medkits > 0
+	var ap_medkit := can_plan and battle.local_ap >= battle.medkit_cost
+	var ap_reload := can_plan and battle.local_ap >= battle.reload_cost
+	var ap_switch := can_plan and battle.local_ap >= battle.switch_weapon_cost
+	var mag_needs := (
+		battle.local_ammo_in_mag < battle.local_mag_size and battle.local_ammo_reserve > 0
 	)
-	ui.set_reload_enabled(can_plan and battle.local_ap >= battle.reload_cost)
+	# Dim only when AP/turn lock blocks the action (or no medkit charges).
+	# Full magazine does not dim the weapon panel — only blocks the press.
+	ui.set_medkit_affordance(
+		ap_medkit and battle.local_medkits > 0,
+		ap_medkit and battle.local_medkits > 0
+	)
+	ui.set_reload_affordance(ap_reload and mag_needs, ap_reload)
+	ui.set_switch_weapon_affordance(ap_switch)
 
 
 func _on_battle_ended(winner_id: String) -> void:

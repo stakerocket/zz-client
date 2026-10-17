@@ -2,6 +2,8 @@ extends Node3D
 class_name ZZUnitView
 
 const MOVE_DURATION := 0.34
+## Run covers hexes 2× faster than walk (same AP timeline feel as 0.5 AP/hex).
+const MOVE_DURATION_RUN := MOVE_DURATION * 0.5
 const CAPSULE_HEIGHT := 2.25
 const CAPSULE_RADIUS := 0.38
 const MODEL_SCENE := preload("res://assets/units/rider.glb")
@@ -25,6 +27,8 @@ var color: Color = Color(0.3, 0.65, 0.95)
 var is_dead: bool = false
 var is_dying: bool = false
 var is_moving: bool = false
+## Run hexes are 2× faster — footstep SFX every other hex keeps walk cadence.
+var _run_foot_hex: int = 0
 
 var _model_root: Node3D
 var _model: Node3D
@@ -550,24 +554,33 @@ func animate_move_to(world_pos: Vector3, with_sfx: bool = false, stop_at_end: bo
 		_move_tween.kill()
 	is_moving = true
 	if with_sfx:
-		Sfx.play_walk()
+		if posture == "run":
+			# Same real-time cadence as walk: one SFX per MOVE_DURATION, not per hex.
+			if _run_foot_hex % 2 == 0:
+				Sfx.play_walk()
+			_run_foot_hex += 1
+		else:
+			_run_foot_hex = 0
+			Sfx.play_walk()
 	_feet_y = world_pos.y
 	var target := Vector3(world_pos.x, _feet_y, world_pos.z)
 	_face_toward(target)
 	_play_run()
+	var dur := MOVE_DURATION_RUN if posture == "run" else MOVE_DURATION
 	var tw := create_tween()
 	_move_tween = tw
 	# Mid-path: linear (no ease restart each hex). Last step: soft ease-out into idle.
 	if stop_at_end:
-		tw.tween_property(self, "position", target, MOVE_DURATION).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+		tw.tween_property(self, "position", target, dur).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	else:
-		tw.tween_property(self, "position", target, MOVE_DURATION).set_trans(Tween.TRANS_LINEAR)
+		tw.tween_property(self, "position", target, dur).set_trans(Tween.TRANS_LINEAR)
 	await tw.finished
 	if _move_tween == tw:
 		position = target
 		_move_tween = null
 		if stop_at_end:
 			is_moving = false
+			_run_foot_hex = 0
 			_play_idle()
 
 
@@ -621,6 +634,8 @@ func set_posture(value: String) -> void:
 			posture = "sit"
 		"cover":
 			posture = "cover"
+		"run":
+			posture = "run"
 		_:
 			posture = "stand"
 	if not is_dying and not is_dead:
@@ -663,6 +678,7 @@ func play_death(front_blocked: bool = false) -> void:
 		_move_tween.kill()
 	_move_tween = null
 	is_moving = false
+	Sfx.play_death()
 	# Clear front → fall with rifle; obstacle ahead → compact death.
 	var clip := ""
 	if front_blocked:
@@ -798,5 +814,7 @@ func _apply_posture_visual() -> void:
 			_model_root.scale = Vector3(s, s * 0.72, s)
 		"cover":
 			_model_root.scale = Vector3(s * 1.05, s * 0.82, s * 0.95)
+		"run":
+			_model_root.scale = Vector3(s * 1.02, s * 0.96, s * 1.02)
 		_:
 			_model_root.scale = Vector3.ONE * s
