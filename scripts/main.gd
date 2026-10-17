@@ -74,6 +74,11 @@ func _ready() -> void:
 	)
 	battle.medkits_changed.connect(func(count: int):
 		ui.set_medkit_count(count, battle.medkit_heal_min, battle.medkit_heal_max, battle.medkit_cost)
+		_refresh_quick_bar()
+		_refresh_consumable_btns()
+	)
+	battle.quick_changed.connect(func():
+		_refresh_quick_bar()
 		_refresh_consumable_btns()
 	)
 	battle.ammo_changed.connect(func(in_mag: int, reserve: int):
@@ -100,6 +105,12 @@ func _ready() -> void:
 		battle.send_chat(text, channel)
 	)
 	ui.return_to_lobby_pressed.connect(_on_return_to_lobby)
+	ui.inventory_open_pressed.connect(func():
+		battle.request_inventory_get()
+	)
+	ui.inventory_equip_requested.connect(battle.request_inventory_equip)
+	ui.inventory_unequip_requested.connect(battle.request_inventory_unequip)
+	battle.inventory_state_received.connect(ui.apply_inventory_state)
 
 
 func _apply_window_fill() -> void:
@@ -120,10 +131,13 @@ func _ensure_environment() -> void:
 		# Soft charcoal void — pure black cuts the eye around the map.
 		env.background_color = Color(0.11, 0.10, 0.09)
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-		env.ambient_light_color = Color(0.62, 0.58, 0.52)
-		env.ambient_light_energy = 0.48
+		env.ambient_light_color = Color(0.68, 0.64, 0.58)
+		env.ambient_light_energy = 0.62
 		env.fog_enabled = false
 		env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+		env.ssao_enabled = true
+		env.ssao_radius = 1.2
+		env.ssao_intensity = 0.55
 		_battle_environment = env
 	if has_node("WorldEnvironment"):
 		_battle_world_env = $WorldEnvironment
@@ -131,13 +145,38 @@ func _ensure_environment() -> void:
 		_battle_world_env = WorldEnvironment.new()
 		_battle_world_env.name = "WorldEnvironment"
 		add_child(_battle_world_env)
-	# Inactive outside battle вЂ” no shared clear color with lobby/login.
+	# Inactive outside battle — no shared clear color with lobby/login.
 	_battle_world_env.environment = null
 	if has_node("DirectionalLight3D"):
 		var sun: DirectionalLight3D = $DirectionalLight3D
-		sun.light_color = Color(1.0, 0.92, 0.78)
-		sun.light_energy = 1.05
-		sun.shadow_opacity = 0.65
+		sun.light_color = Color(1.0, 0.94, 0.82)
+		sun.light_energy = 1.25
+		sun.shadow_enabled = true
+		sun.shadow_opacity = 0.7
+		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+	_ensure_battle_fill_light()
+
+
+func _ensure_battle_fill_light() -> void:
+	## Soft fill + cool rim so PBR reads like Tripo/Blender studio light (not flat sun).
+	var fill := get_node_or_null("FillLight3D") as DirectionalLight3D
+	if fill == null:
+		fill = DirectionalLight3D.new()
+		fill.name = "FillLight3D"
+		add_child(fill)
+	fill.rotation_degrees = Vector3(-25, -130, 0)
+	fill.light_color = Color(0.72, 0.78, 0.92)
+	fill.light_energy = 0.45
+	fill.shadow_enabled = false
+	var rim := get_node_or_null("RimLight3D") as DirectionalLight3D
+	if rim == null:
+		rim = DirectionalLight3D.new()
+		rim.name = "RimLight3D"
+		add_child(rim)
+	rim.rotation_degrees = Vector3(-10, 160, 0)
+	rim.light_color = Color(0.95, 0.9, 0.85)
+	rim.light_energy = 0.35
+	rim.shadow_enabled = false
 
 
 func _set_battle_view_active(active: bool) -> void:
@@ -191,6 +230,7 @@ func _on_battle_started() -> void:
 	ui.set_medkit_count(
 		battle.local_medkits, battle.medkit_heal_min, battle.medkit_heal_max, battle.medkit_cost
 	)
+	_refresh_quick_bar()
 	ui.set_history([])
 	ui.set_undo_enabled(false)
 	_refresh_consumable_btns()
@@ -443,6 +483,22 @@ func _clamp_focus() -> void:
 	_focus.y = 0.0
 
 
+func _refresh_quick_bar() -> void:
+	var counts: Array = []
+	for i in range(4):
+		var id := ""
+		if i < battle.local_quick.size():
+			id = str(battle.local_quick[i])
+		counts.append(battle.stack_qty(id) if id != "" else 0)
+	ui.set_quick_slots(
+		battle.local_quick,
+		counts,
+		battle.medkit_heal_min,
+		battle.medkit_heal_max,
+		battle.medkit_cost
+	)
+
+
 func _refresh_consumable_btns() -> void:
 	var can_plan := not battle.input_locked and battle.in_battle
 	var ap_medkit := can_plan and battle.local_ap >= battle.medkit_cost
@@ -451,13 +507,28 @@ func _refresh_consumable_btns() -> void:
 	var mag_needs := (
 		battle.local_ammo_in_mag < battle.local_mag_size and battle.local_ammo_reserve > 0
 	)
-	# Dim only when AP/turn lock blocks the action (or no medkit charges).
-	# Full magazine does not dim the weapon panel — only blocks the press.
+	# Per quick slot: medkit needs AP+charges; empty/non-usable dimmed.
+	for i in range(4):
+		var id := ""
+		if i < battle.local_quick.size():
+			id = str(battle.local_quick[i])
+		if id == "":
+			ui.set_quick_affordance(i, false, false)
+			continue
+		var t := str(ZZLos.item_def(id).get("type", ""))
+		if t == "medkit":
+			var ok := ap_medkit and battle.local_medkits > 0
+			ui.set_quick_affordance(i, ok, ok)
+		else:
+			## Ammo / other: display only for now.
+			ui.set_quick_affordance(i, false, true)
 	ui.set_medkit_affordance(
 		ap_medkit and battle.local_medkits > 0,
 		ap_medkit and battle.local_medkits > 0
 	)
-	ui.set_reload_affordance(ap_reload and mag_needs, ap_reload)
+	# Full mag: stay bright while planning — gray would look like "no AP".
+	var look_reload := can_plan if not mag_needs else ap_reload
+	ui.set_reload_affordance(ap_reload and mag_needs, look_reload)
 	ui.set_switch_weapon_affordance(ap_switch)
 
 

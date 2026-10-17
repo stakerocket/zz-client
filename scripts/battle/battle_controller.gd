@@ -34,6 +34,7 @@ signal battle_ended(winner_id: String)
 signal room_players_changed(nicks: Array)
 signal chat_received(nick: String, text: String, channel: String)
 signal rules_changed
+signal inventory_state_received(data: Dictionary)
 
 var ws: ZZWSClient
 var grid: ZZGridView
@@ -45,6 +46,11 @@ var input_locked: bool = true
 var local_ap: int = 0
 var local_hp: int = 0
 var local_medkits: int = 5
+## Hotbar item ids from inventory quick slots (len 4).
+var local_quick: Array = ["", "", "", ""]
+## Last known inventory stacks (for quick-slot qty badges).
+var local_inventory: Array = []
+signal quick_changed
 ## Ammo: server state is source of truth; local queue mirrors like medkits until resolve.
 var local_ammo_in_mag: int = 6
 var local_ammo_reserve: int = 24
@@ -122,6 +128,24 @@ func connect_and_join_lobby(nick: String) -> bool:
 		return false
 	ws.send_dict(ZZProtocol.join_lobby(nick))
 	return true
+
+
+func request_inventory_get() -> void:
+	if not ws.is_open() or in_battle:
+		return
+	ws.send_dict(ZZProtocol.inventory_get())
+
+
+func request_inventory_equip(item_id: String, slot: String) -> void:
+	if not ws.is_open() or in_battle or item_id == "" or slot == "":
+		return
+	ws.send_dict(ZZProtocol.inventory_equip(item_id, slot))
+
+
+func request_inventory_unequip(slot: String) -> void:
+	if not ws.is_open() or in_battle or slot == "":
+		return
+	ws.send_dict(ZZProtocol.inventory_unequip(slot))
 
 
 func send_chat(text: String, channel: String = "lobby") -> void:
@@ -307,6 +331,9 @@ func _on_message(data: Dictionary) -> void:
 			ZZLos.apply_item_catalog(data.get("item_catalog", {}))
 			rules_changed.emit()
 			room_players_changed.emit(data.get("players", []))
+		"inventory_state":
+			_apply_quick_from_payload(data)
+			inventory_state_received.emit(data)
 		"chat":
 			var ch := str(data.get("channel", "lobby"))
 			if ch != "battle":
@@ -425,6 +452,30 @@ func _apply_combat_rules(rules: Variant) -> void:
 	if max_hp <= 0:
 		max_hp = ZZLos.compute_max_hp()
 	rules_changed.emit()
+
+
+func _apply_quick_from_payload(data: Dictionary) -> void:
+	local_quick = ["", "", "", ""]
+	var q: Variant = data.get("quick", [])
+	if typeof(q) == TYPE_ARRAY:
+		for i in range(mini(4, q.size())):
+			local_quick[i] = str(q[i])
+	var inv: Variant = data.get("inventory", [])
+	if typeof(inv) == TYPE_ARRAY and not inv.is_empty():
+		local_inventory = inv
+	quick_changed.emit()
+
+
+func stack_qty(item_id: String) -> int:
+	if item_id == "":
+		return 0
+	for s in local_inventory:
+		if typeof(s) == TYPE_DICTIONARY and str(s.get("item_id", "")) == item_id:
+			return int(s.get("qty", 0))
+	## Medkit qty is also mirrored in local_medkits during battle.
+	if str(ZZLos.item_def(item_id).get("type", "")) == "medkit":
+		return local_medkits
+	return 0
 
 
 func _apply_local_weapon(pd: Dictionary) -> void:
@@ -1070,6 +1121,7 @@ func _apply_state(state: Variant, reset_queue: bool, snap_positions: bool) -> vo
 			_turn_start_posture = local_posture
 			_turn_start_medkits = local_medkits
 			_apply_local_weapon(pd)
+			_apply_quick_from_payload(pd)
 			ap_changed.emit(local_ap)
 			hp_changed.emit(local_hp)
 			medkits_changed.emit(local_medkits)
@@ -1605,10 +1657,13 @@ func _emit_history() -> void:
 				var wname := "оружие"
 				if widx < local_weapons.size() and typeof(local_weapons[widx]) == TYPE_DICTIONARY:
 					var wid := str(local_weapons[widx].get("id", ""))
-					if wid == "pistol":
+					if wid == "glock17":
 						wname = "пистолет"
-					elif wid == "rifle":
+					elif wid == "kar98":
 						wname = "винтовка"
+					elif wid != "":
+						var def := ZZLos.item_def(wid)
+						wname = str(def.get("name", wid))
 				lines.append("Смена: %s · %d ОД" % [wname, switch_weapon_cost])
 	_flush_move_history(lines, move_run, move_end, move_ap)
 	history_changed.emit(lines)

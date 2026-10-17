@@ -65,10 +65,13 @@ static func apply_item_catalog(raw: Variant) -> void:
 		"default_loadout": cat.get("default_loadout", []),
 		"by_id": by_id,
 	}
-	# Prefer catalog weapon params for aim / costs when present.
-	var rifle: Variant = by_id.get("rifle", null)
-	if typeof(rifle) == TYPE_DICTIONARY:
-		var params: Variant = rifle.get("params", {})
+	# Prefer first catalog weapon / medkit params (ids are data-driven).
+	for it in items:
+		if typeof(it) != TYPE_DICTIONARY:
+			continue
+		if str(it.get("type", "")) != "weapon":
+			continue
+		var params: Variant = it.get("params", {})
 		if typeof(params) == TYPE_DICTIONARY:
 			apply_weapon({
 				"shoot_ap": params.get("shoot_ap", 0),
@@ -79,9 +82,13 @@ static func apply_item_catalog(raw: Variant) -> void:
 				"mag_size": params.get("mag_size", 0),
 				"reload_ap": params.get("reload_ap", 0),
 			})
-	var med: Variant = by_id.get("medkit", null)
-	if typeof(med) == TYPE_DICTIONARY:
-		var mp: Variant = med.get("params", {})
+		break
+	for it2 in items:
+		if typeof(it2) != TYPE_DICTIONARY:
+			continue
+		if str(it2.get("type", "")) != "medkit":
+			continue
+		var mp: Variant = it2.get("params", {})
 		if typeof(mp) == TYPE_DICTIONARY:
 			if mp.has("use_ap"):
 				_rules["medkit_ap"] = int(mp["use_ap"])
@@ -89,10 +96,15 @@ static func apply_item_catalog(raw: Variant) -> void:
 				_rules["medkit_heal_min"] = int(mp["heal_min"])
 			if mp.has("heal_max"):
 				_rules["medkit_heal_max"] = int(mp["heal_max"])
+		break
 
 
 static func has_item_catalog() -> bool:
 	return not _item_catalog.is_empty()
+
+
+static func default_loadout() -> Array:
+	return _item_catalog.get("default_loadout", [])
 
 
 static func item_def(item_id: String) -> Dictionary:

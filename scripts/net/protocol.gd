@@ -44,3 +44,15 @@ static func reload_action() -> Dictionary:
 
 static func switch_weapon_action(weapon_index: int) -> Dictionary:
 	return {"type": "switch_weapon", "weapon_index": int(weapon_index)}
+
+
+static func inventory_get() -> Dictionary:
+	return {"type": "inventory_get"}
+
+
+static func inventory_equip(item_id: String, slot: String) -> Dictionary:
+	return {"type": "inventory_equip", "item_id": item_id, "slot": slot}
+
+
+static func inventory_unequip(slot: String) -> Dictionary:
+	return {"type": "inventory_unequip", "slot": slot}

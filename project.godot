@@ -28,4 +28,11 @@ Sfx="*res://scripts/audio/sfx.gd"
 window/size/viewport_width=1280
 window/size/viewport_height=720
 window/stretch/mode="canvas_items"
-"battle framingâ#thatisaglobalsettingandbreakslobby(blacksidebars).Battlevoidâ lobbyletterbox.window/stretch/aspect"="ignore"
+window/stretch/aspect="ignore"
+
+[rendering]
+
+anti_aliasing/quality/msaa_3d=2
+textures/default_filters/anisotropic_filtering_level=4
+lights_and_shadows/directional_shadow/size=4096
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3

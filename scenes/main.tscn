@@ -56,6 +56,102 @@ content_margin_top = 10
 content_margin_right = 14
 content_margin_bottom = 10
 
+[sub_resource type="StyleBoxFlat" id="StyleLobbyBtnNormal"]
+bg_color = Color(0.62, 0.45, 0.26, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.78, 0.58, 0.34, 1)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+content_margin_left = 8
+content_margin_top = 4
+content_margin_right = 8
+content_margin_bottom = 4
+
+[sub_resource type="StyleBoxFlat" id="StyleLobbyBtnHover"]
+bg_color = Color(0.72, 0.53, 0.3, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.88, 0.68, 0.4, 1)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+content_margin_left = 8
+content_margin_top = 4
+content_margin_right = 8
+content_margin_bottom = 4
+
+[sub_resource type="StyleBoxFlat" id="StyleLobbyBtnPressed"]
+bg_color = Color(0.45, 0.32, 0.18, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.6, 0.44, 0.26, 1)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+content_margin_left = 8
+content_margin_top = 4
+content_margin_right = 8
+content_margin_bottom = 4
+
+[sub_resource type="StyleBoxFlat" id="StyleLobbyInvBtnNormal"]
+bg_color = Color(0.62, 0.45, 0.26, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.78, 0.58, 0.34, 1)
+corner_radius_top_left = 2
+corner_radius_top_right = 2
+corner_radius_bottom_right = 2
+corner_radius_bottom_left = 2
+content_margin_left = 0
+content_margin_top = 0
+content_margin_right = 0
+content_margin_bottom = 0
+
+[sub_resource type="StyleBoxFlat" id="StyleLobbyInvBtnHover"]
+bg_color = Color(0.72, 0.53, 0.3, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.88, 0.68, 0.4, 1)
+corner_radius_top_left = 2
+corner_radius_top_right = 2
+corner_radius_bottom_right = 2
+corner_radius_bottom_left = 2
+content_margin_left = 0
+content_margin_top = 0
+content_margin_right = 0
+content_margin_bottom = 0
+
+[sub_resource type="StyleBoxFlat" id="StyleLobbyInvBtnPressed"]
+bg_color = Color(0.45, 0.32, 0.18, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.6, 0.44, 0.26, 1)
+corner_radius_top_left = 2
+corner_radius_top_right = 2
+corner_radius_bottom_right = 2
+corner_radius_bottom_left = 2
+content_margin_left = 0
+content_margin_top = 0
+content_margin_right = 0
+content_margin_bottom = 0
+
 [sub_resource type="StyleBoxFlat" id="StyleChatEdit"]
 bg_color = Color(0.08, 0.08, 0.09, 0.28)
 border_width_left = 0
@@ -584,7 +680,7 @@ anchor_right = 1.0
 offset_left = -168.0
 offset_top = 4.0
 offset_right = -2.0
-offset_bottom = 236.0
+offset_bottom = 268.0
 grow_horizontal = 0
 
 [node name="VBox" type="VBoxContainer" parent="UI/LobbyScreen/PlayerCard"]
@@ -673,6 +769,17 @@ theme_override_font_sizes/font_size = 10
 text = "Вес: —"
 horizontal_alignment = 0
 
+[node name="InventoryBtn" type="Button" parent="UI/LobbyScreen/PlayerCard/VBox"]
+custom_minimum_size = Vector2(0, 20)
+layout_mode = 2
+theme_override_font_sizes/font_size = 10
+theme_override_colors/font_color = Color(0.95, 0.9, 0.8, 1)
+theme_override_styles/normal = SubResource("StyleLobbyInvBtnNormal")
+theme_override_styles/hover = SubResource("StyleLobbyInvBtnHover")
+theme_override_styles/pressed = SubResource("StyleLobbyInvBtnPressed")
+theme_override_styles/focus = SubResource("StyleLobbyInvBtnHover")
+text = "Инвентарь"
+
 [node name="FindCenter" type="CenterContainer" parent="UI/LobbyScreen"]
 layout_mode = 1
 anchors_preset = 15
@@ -684,18 +791,18 @@ grow_vertical = 2
 mouse_filter = 2
 
 [node name="FindBtn" type="Button" parent="UI/LobbyScreen/FindCenter"]
-custom_minimum_size = Vector2(220, 52)
+custom_minimum_size = Vector2(140, 32)
 layout_mode = 2
 theme_override_colors/font_color = Color(0.98, 0.93, 0.82, 1)
 theme_override_colors/font_hover_color = Color(1, 0.97, 0.9, 1)
 theme_override_colors/font_pressed_color = Color(0.9, 0.84, 0.72, 1)
 theme_override_colors/font_disabled_color = Color(0.75, 0.68, 0.55, 0.7)
-theme_override_font_sizes/font_size = 18
-theme_override_styles/normal = SubResource("StyleLoginBtnNormal")
-theme_override_styles/hover = SubResource("StyleLoginBtnHover")
-theme_override_styles/pressed = SubResource("StyleLoginBtnPressed")
-theme_override_styles/disabled = SubResource("StyleLoginBtnPressed")
-theme_override_styles/focus = SubResource("StyleLoginBtnHover")
+theme_override_font_sizes/font_size = 13
+theme_override_styles/normal = SubResource("StyleLobbyBtnNormal")
+theme_override_styles/hover = SubResource("StyleLobbyBtnHover")
+theme_override_styles/pressed = SubResource("StyleLobbyBtnPressed")
+theme_override_styles/disabled = SubResource("StyleLobbyBtnPressed")
+theme_override_styles/focus = SubResource("StyleLobbyBtnHover")
 text = "Найти бой"
 
 [node name="PlanDock" type="PanelContainer" parent="UI"]
@@ -799,9 +906,9 @@ anchor_left = 0.5
 anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
-offset_left = -200.0
-offset_top = -126.0
-offset_right = 200.0
+offset_left = -190.0
+offset_top = -132.0
+offset_right = 190.0
 offset_bottom = -6.0
 grow_horizontal = 2
 grow_vertical = 0
@@ -811,40 +918,31 @@ theme_override_styles/panel = SubResource("StyleBattleHudPanel")
 layout_mode = 2
 theme_override_constants/separation = 2
 
-[node name="TitleRow" type="HBoxContainer" parent="UI/BattleHud/CharDock/VBox"]
-layout_mode = 2
-theme_override_constants/separation = 4
-
-[node name="CardTitle" type="Label" parent="UI/BattleHud/CharDock/VBox/TitleRow"]
+[node name="TopRow" type="HBoxContainer" parent="UI/BattleHud/CharDock/VBox"]
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_colors/font_color = Color(0.95, 0.93, 0.88, 1)
-theme_override_font_sizes/font_size = 11
-text = "Nick"
-horizontal_alignment = 1
+theme_override_constants/separation = 6
+alignment = 0
 
-[node name="UndoBtn" type="Button" parent="UI/BattleHud/CharDock/VBox/TitleRow"]
-custom_minimum_size = Vector2(24, 24)
+[node name="VitalCol" type="VBoxContainer" parent="UI/BattleHud/CharDock/VBox/TopRow"]
+custom_minimum_size = Vector2(112, 0)
 layout_mode = 2
-focus_mode = 0
-theme_override_styles/normal = SubResource("StyleBattleSlot")
-theme_override_styles/hover = SubResource("StyleBattleSlotHover")
-theme_override_styles/pressed = SubResource("StyleBattleSlotHover")
-theme_override_styles/focus = SubResource("StyleBattleSlotHover")
-theme_override_styles/disabled = SubResource("StyleBattleSlot")
-tooltip_text = "Отменить последнее действие"
-
-[node name="HPRow" type="HBoxContainer" parent="UI/BattleHud/CharDock/VBox"]
-layout_mode = 2
+size_flags_vertical = 4
 theme_override_constants/separation = 4
+alignment = 1
 
-[node name="HPCaption" type="Label" parent="UI/BattleHud/CharDock/VBox/HPRow"]
-custom_minimum_size = Vector2(22, 0)
+[node name="HPRow" type="HBoxContainer" parent="UI/BattleHud/CharDock/VBox/TopRow/VitalCol"]
+layout_mode = 2
+theme_override_constants/separation = 3
+
+[node name="HPCaption" type="Label" parent="UI/BattleHud/CharDock/VBox/TopRow/VitalCol/HPRow"]
+custom_minimum_size = Vector2(18, 0)
 layout_mode = 2
 theme_override_font_sizes/font_size = 9
 text = "ХП"
+vertical_alignment = 1
 
-[node name="HPBar" type="ProgressBar" parent="UI/BattleHud/CharDock/VBox/HPRow"]
+[node name="HPBar" type="ProgressBar" parent="UI/BattleHud/CharDock/VBox/TopRow/VitalCol/HPRow"]
 custom_minimum_size = Vector2(0, 10)
 layout_mode = 2
 size_flags_horizontal = 3
@@ -855,24 +953,26 @@ max_value = 100.0
 value = 100.0
 show_percentage = false
 
-[node name="HPValue" type="Label" parent="UI/BattleHud/CharDock/VBox/HPRow"]
-custom_minimum_size = Vector2(52, 0)
+[node name="HPValue" type="Label" parent="UI/BattleHud/CharDock/VBox/TopRow/VitalCol/HPRow"]
+custom_minimum_size = Vector2(20, 0)
 layout_mode = 2
 theme_override_font_sizes/font_size = 9
-text = "100 / 100"
+text = "100"
 horizontal_alignment = 2
+vertical_alignment = 1
 
-[node name="APRow" type="HBoxContainer" parent="UI/BattleHud/CharDock/VBox"]
+[node name="APRow" type="HBoxContainer" parent="UI/BattleHud/CharDock/VBox/TopRow/VitalCol"]
 layout_mode = 2
-theme_override_constants/separation = 4
+theme_override_constants/separation = 3
 
-[node name="APCaption" type="Label" parent="UI/BattleHud/CharDock/VBox/APRow"]
-custom_minimum_size = Vector2(22, 0)
+[node name="APCaption" type="Label" parent="UI/BattleHud/CharDock/VBox/TopRow/VitalCol/APRow"]
+custom_minimum_size = Vector2(18, 0)
 layout_mode = 2
 theme_override_font_sizes/font_size = 9
 text = "ОД"
+vertical_alignment = 1
 
-[node name="APBar" type="ProgressBar" parent="UI/BattleHud/CharDock/VBox/APRow"]
+[node name="APBar" type="ProgressBar" parent="UI/BattleHud/CharDock/VBox/TopRow/VitalCol/APRow"]
 custom_minimum_size = Vector2(0, 10)
 layout_mode = 2
 size_flags_horizontal = 3
@@ -883,15 +983,211 @@ max_value = 10.0
 value = 10.0
 show_percentage = false
 
-[node name="APValue" type="Label" parent="UI/BattleHud/CharDock/VBox/APRow"]
-custom_minimum_size = Vector2(52, 0)
+[node name="APValue" type="Label" parent="UI/BattleHud/CharDock/VBox/TopRow/VitalCol/APRow"]
+custom_minimum_size = Vector2(20, 0)
 layout_mode = 2
 theme_override_font_sizes/font_size = 9
-text = "10 / 10"
+text = "10"
 horizontal_alignment = 2
+vertical_alignment = 1
+
+[node name="QuickBar" type="HBoxContainer" parent="UI/BattleHud/CharDock/VBox/TopRow"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_constants/separation = 3
+alignment = 1
+
+[node name="Quick0" type="Button" parent="UI/BattleHud/CharDock/VBox/TopRow/QuickBar"]
+custom_minimum_size = Vector2(52, 56)
+layout_mode = 2
+theme_override_styles/normal = SubResource("StyleBattleSlot")
+theme_override_styles/hover = SubResource("StyleBattleSlotHover")
+theme_override_styles/pressed = SubResource("StyleBattleSlotHover")
+theme_override_styles/focus = SubResource("StyleBattleSlotHover")
+
+[node name="Icon" type="TextureRect" parent="UI/BattleHud/CharDock/VBox/TopRow/QuickBar/Quick0"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 3.0
+offset_top = 3.0
+offset_right = -3.0
+offset_bottom = -3.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="CountLabel" type="Label" parent="UI/BattleHud/CharDock/VBox/TopRow/QuickBar/Quick0"]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -28.0
+offset_top = -14.0
+offset_right = -2.0
+offset_bottom = -1.0
+grow_horizontal = 0
+grow_vertical = 0
+theme_override_colors/font_color = Color(0.95, 0.93, 0.88, 1)
+theme_override_colors/font_outline_color = Color(0.05, 0.05, 0.05, 0.9)
+theme_override_constants/outline_size = 2
+theme_override_font_sizes/font_size = 11
+horizontal_alignment = 2
+vertical_alignment = 2
+mouse_filter = 2
+
+[node name="Quick1" type="Button" parent="UI/BattleHud/CharDock/VBox/TopRow/QuickBar"]
+custom_minimum_size = Vector2(52, 56)
+layout_mode = 2
+theme_override_styles/normal = SubResource("StyleBattleSlot")
+theme_override_styles/hover = SubResource("StyleBattleSlotHover")
+theme_override_styles/pressed = SubResource("StyleBattleSlotHover")
+theme_override_styles/focus = SubResource("StyleBattleSlotHover")
+
+[node name="Icon" type="TextureRect" parent="UI/BattleHud/CharDock/VBox/TopRow/QuickBar/Quick1"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 3.0
+offset_top = 3.0
+offset_right = -3.0
+offset_bottom = -3.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="CountLabel" type="Label" parent="UI/BattleHud/CharDock/VBox/TopRow/QuickBar/Quick1"]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -28.0
+offset_top = -14.0
+offset_right = -2.0
+offset_bottom = -1.0
+grow_horizontal = 0
+grow_vertical = 0
+theme_override_colors/font_color = Color(0.95, 0.93, 0.88, 1)
+theme_override_colors/font_outline_color = Color(0.05, 0.05, 0.05, 0.9)
+theme_override_constants/outline_size = 2
+theme_override_font_sizes/font_size = 11
+horizontal_alignment = 2
+vertical_alignment = 2
+mouse_filter = 2
+
+[node name="Quick2" type="Button" parent="UI/BattleHud/CharDock/VBox/TopRow/QuickBar"]
+custom_minimum_size = Vector2(52, 56)
+layout_mode = 2
+theme_override_styles/normal = SubResource("StyleBattleSlot")
+theme_override_styles/hover = SubResource("StyleBattleSlotHover")
+theme_override_styles/pressed = SubResource("StyleBattleSlotHover")
+theme_override_styles/focus = SubResource("StyleBattleSlotHover")
+
+[node name="Icon" type="TextureRect" parent="UI/BattleHud/CharDock/VBox/TopRow/QuickBar/Quick2"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 3.0
+offset_top = 3.0
+offset_right = -3.0
+offset_bottom = -3.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="CountLabel" type="Label" parent="UI/BattleHud/CharDock/VBox/TopRow/QuickBar/Quick2"]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -28.0
+offset_top = -14.0
+offset_right = -2.0
+offset_bottom = -1.0
+grow_horizontal = 0
+grow_vertical = 0
+theme_override_colors/font_color = Color(0.95, 0.93, 0.88, 1)
+theme_override_colors/font_outline_color = Color(0.05, 0.05, 0.05, 0.9)
+theme_override_constants/outline_size = 2
+theme_override_font_sizes/font_size = 11
+horizontal_alignment = 2
+vertical_alignment = 2
+mouse_filter = 2
+
+[node name="Quick3" type="Button" parent="UI/BattleHud/CharDock/VBox/TopRow/QuickBar"]
+custom_minimum_size = Vector2(52, 56)
+layout_mode = 2
+theme_override_styles/normal = SubResource("StyleBattleSlot")
+theme_override_styles/hover = SubResource("StyleBattleSlotHover")
+theme_override_styles/pressed = SubResource("StyleBattleSlotHover")
+theme_override_styles/focus = SubResource("StyleBattleSlotHover")
+
+[node name="Icon" type="TextureRect" parent="UI/BattleHud/CharDock/VBox/TopRow/QuickBar/Quick3"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 3.0
+offset_top = 3.0
+offset_right = -3.0
+offset_bottom = -3.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="CountLabel" type="Label" parent="UI/BattleHud/CharDock/VBox/TopRow/QuickBar/Quick3"]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -28.0
+offset_top = -14.0
+offset_right = -2.0
+offset_bottom = -1.0
+grow_horizontal = 0
+grow_vertical = 0
+theme_override_colors/font_color = Color(0.95, 0.93, 0.88, 1)
+theme_override_colors/font_outline_color = Color(0.05, 0.05, 0.05, 0.9)
+theme_override_constants/outline_size = 2
+theme_override_font_sizes/font_size = 11
+horizontal_alignment = 2
+vertical_alignment = 2
+mouse_filter = 2
+
+[node name="UndoBtn" type="Button" parent="UI/BattleHud/CharDock/VBox/TopRow"]
+custom_minimum_size = Vector2(28, 56)
+layout_mode = 2
+size_flags_vertical = 4
+focus_mode = 0
+theme_override_styles/normal = SubResource("StyleBattleSlot")
+theme_override_styles/hover = SubResource("StyleBattleSlotHover")
+theme_override_styles/pressed = SubResource("StyleBattleSlotHover")
+theme_override_styles/focus = SubResource("StyleBattleSlotHover")
+theme_override_styles/disabled = SubResource("StyleBattleSlot")
+tooltip_text = "Отменить последнее действие"
 
 [node name="ActionRow" type="HBoxContainer" parent="UI/BattleHud/CharDock/VBox"]
 layout_mode = 2
+size_flags_horizontal = 3
 theme_override_constants/separation = 4
 
 [node name="QuickGrid" type="GridContainer" parent="UI/BattleHud/CharDock/VBox/ActionRow"]
@@ -932,7 +1228,7 @@ theme_override_styles/normal = SubResource("StyleBattleSlot")
 theme_override_styles/hover = SubResource("StyleBattleSlotHover")
 theme_override_styles/pressed = SubResource("StyleBattleSlotHover")
 theme_override_styles/focus = SubResource("StyleBattleSlotHover")
-tooltip_text = "Сидя — ход 2 ОД, +15% к выстрелу"
+tooltip_text = "Крадучись — ход 2 ОД, +15% к выстрелу"
 
 [node name="CoverBtn" type="Button" parent="UI/BattleHud/CharDock/VBox/ActionRow/QuickGrid"]
 custom_minimum_size = Vector2(28, 28)
@@ -943,69 +1239,12 @@ theme_override_styles/normal = SubResource("StyleBattleSlot")
 theme_override_styles/hover = SubResource("StyleBattleSlotHover")
 theme_override_styles/pressed = SubResource("StyleBattleSlotHover")
 theme_override_styles/focus = SubResource("StyleBattleSlotHover")
-tooltip_text = "Укрытие — без хода и стрельбы"
-
-[node name="MedkitBtn" type="Button" parent="UI/BattleHud/CharDock/VBox/ActionRow"]
-custom_minimum_size = Vector2(68, 60)
-layout_mode = 2
-theme_override_styles/normal = SubResource("StyleBattleSlot")
-theme_override_styles/hover = SubResource("StyleBattleSlotHover")
-theme_override_styles/pressed = SubResource("StyleBattleSlotHover")
-theme_override_styles/focus = SubResource("StyleBattleSlotHover")
-tooltip_text = "Аптечка"
-
-[node name="Icon" type="TextureRect" parent="UI/BattleHud/CharDock/VBox/ActionRow/MedkitBtn"]
-layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -22.0
-offset_top = -24.0
-offset_right = 22.0
-offset_bottom = 12.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-expand_mode = 1
-stretch_mode = 5
-
-[node name="CostLabel" type="Label" parent="UI/BattleHud/CharDock/VBox/ActionRow/MedkitBtn"]
-layout_mode = 1
-anchors_preset = 1
-anchor_left = 1.0
-anchor_right = 1.0
-offset_left = -30.0
-offset_top = 1.0
-offset_right = -2.0
-offset_bottom = 13.0
-grow_horizontal = 0
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 0.92)
-theme_override_font_sizes/font_size = 8
-text = "3 ОД"
-horizontal_alignment = 2
-mouse_filter = 2
-
-[node name="CountLabel" type="Label" parent="UI/BattleHud/CharDock/VBox/ActionRow/MedkitBtn"]
-layout_mode = 1
-anchors_preset = 12
-anchor_top = 1.0
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_top = -13.0
-offset_bottom = -1.0
-grow_horizontal = 2
-grow_vertical = 0
-theme_override_font_sizes/font_size = 8
-text = "5 шт."
-horizontal_alignment = 1
-mouse_filter = 2
+tooltip_text = "Укрыться у земли — без хода и стрельбы"
 
 [node name="WeaponBtn" type="Button" parent="UI/BattleHud/CharDock/VBox/ActionRow"]
-custom_minimum_size = Vector2(140, 60)
+custom_minimum_size = Vector2(128, 56)
 layout_mode = 2
-size_flags_horizontal = 3
+size_flags_horizontal = 0
 focus_mode = 0
 theme_override_styles/normal = SubResource("StyleBattleSlot")
 theme_override_styles/hover = SubResource("StyleBattleSlotHover")
@@ -1017,15 +1256,15 @@ tooltip_text = "Перезарядка"
 [node name="ReloadRow" type="HBoxContainer" parent="UI/BattleHud/CharDock/VBox/ActionRow/WeaponBtn"]
 layout_mode = 1
 anchors_preset = 0
-offset_left = 3.0
-offset_top = 2.0
-offset_right = 56.0
-offset_bottom = 15.0
-theme_override_constants/separation = 2
+offset_left = 2.0
+offset_top = 1.0
+offset_right = 48.0
+offset_bottom = 14.0
+theme_override_constants/separation = 1
 mouse_filter = 2
 
 [node name="ReloadIcon" type="TextureRect" parent="UI/BattleHud/CharDock/VBox/ActionRow/WeaponBtn/ReloadRow"]
-custom_minimum_size = Vector2(12, 12)
+custom_minimum_size = Vector2(14, 14)
 layout_mode = 2
 mouse_filter = 2
 expand_mode = 1
@@ -1034,7 +1273,7 @@ stretch_mode = 5
 [node name="ReloadCostLabel" type="Label" parent="UI/BattleHud/CharDock/VBox/ActionRow/WeaponBtn/ReloadRow"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 0.92)
-theme_override_font_sizes/font_size = 8
+theme_override_font_sizes/font_size = 7
 text = "6 ОД"
 mouse_filter = 2
 
@@ -1045,10 +1284,10 @@ anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -50.0
-offset_top = -22.0
-offset_right = 50.0
-offset_bottom = 6.0
+offset_left = -40.0
+offset_top = -20.0
+offset_right = 40.0
+offset_bottom = 4.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
@@ -1062,26 +1301,26 @@ anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -52.0
-offset_top = 6.0
-offset_right = 52.0
-offset_bottom = 18.0
+offset_left = -42.0
+offset_top = 5.0
+offset_right = 42.0
+offset_bottom = 16.0
 grow_horizontal = 2
 grow_vertical = 2
 alignment = 1
-theme_override_constants/separation = 4
+theme_override_constants/separation = 2
 mouse_filter = 2
 
 [node name="AmmoCol" type="HBoxContainer" parent="UI/BattleHud/CharDock/VBox/ActionRow/WeaponBtn/AmmoRow"]
 layout_mode = 2
 size_flags_horizontal = 4
-theme_override_constants/separation = 1
+theme_override_constants/separation = 0
 mouse_filter = 2
 
 [node name="AmmoCountLabel" type="Label" parent="UI/BattleHud/CharDock/VBox/ActionRow/WeaponBtn/AmmoRow"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 0.92)
-theme_override_font_sizes/font_size = 8
+theme_override_font_sizes/font_size = 7
 text = "6/30"
 mouse_filter = 2
 
@@ -1091,15 +1330,15 @@ anchors_preset = 12
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 3.0
-offset_top = -12.0
-offset_right = -3.0
+offset_left = 2.0
+offset_top = -11.0
+offset_right = -2.0
 offset_bottom = -1.0
 grow_horizontal = 2
 grow_vertical = 0
 theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 0.92)
-theme_override_font_sizes/font_size = 8
-text = "ОД: 3 (ВЫСТРЕЛ)"
+theme_override_font_sizes/font_size = 7
+text = "ОД: 3"
 mouse_filter = 2
 
 [node name="ResultOverlay" type="Control" parent="UI/BattleHud"]

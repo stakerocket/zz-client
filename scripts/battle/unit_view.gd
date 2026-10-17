@@ -113,6 +113,7 @@ func _spawn_model() -> void:
 	_model = MODEL_SCENE.instantiate() as Node3D
 	_model_root.add_child(_model)
 	_collect_meshes(_model)
+	_polish_model_meshes()
 	_anim = _find_anim_player(_model)
 	_skeleton = _find_skeleton(_model)
 	_cache_hips_bone()
@@ -129,6 +130,25 @@ func _spawn_model() -> void:
 	if _meshes.is_empty():
 		push_warning("ZZUnitView: rider.glb has no meshes, falling back to capsule")
 		_spawn_capsule_fallback()
+
+
+func _polish_model_meshes() -> void:
+	## Keep full mesh detail + PBR read (Tripo/Blender look). Auto-LOD on a 5k
+	## character makes it look like ~500 tris at battle ortho distance.
+	for mi in _meshes:
+		mi.lod_bias = 0.01
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		var mesh := mi.mesh
+		if mesh == null:
+			continue
+		for si in range(mesh.get_surface_count()):
+			var mat := mi.get_active_material(si)
+			if mat is BaseMaterial3D:
+				var bm: BaseMaterial3D = mat
+				bm.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+				if bm.normal_enabled:
+					bm.normal_scale = 1.15
+				bm.metallic_specular = 0.55
 
 
 func _prepare_locomotion_anims() -> void:
