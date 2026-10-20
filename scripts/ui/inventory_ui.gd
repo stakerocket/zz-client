@@ -6,14 +6,18 @@ class_name ZZInventoryUI
 signal closed
 signal equip_requested(item_id: String, slot: String)
 signal unequip_requested(slot: String)
+signal withdraw_requested(item_id: String, qty: int)
+signal deposit_requested(item_id: String, qty: int)
 
 ## Fixed design size inside 1280×720 canvas.
-## Width fits left column + 4×5 bag grid (no black strip right of bag).
-const SHELL_W := 580.0
+## Width fits left + bag + locker (fitted in _fit_shell_to_left).
+const SHELL_W := 860.0
 ## Shell height is fitted to left column after layout (preview + quick).
 const SHELL_H := 360.0
 const GRID_COLS := 4
 const GRID_ROWS := 5
+const LOCKER_COLS := 3
+const AMMO_STACK_QTY := 24
 const CELL_SEP := 3
 ## Equal inset around the item grid (left / right / top). Bottom stays tighter for weight.
 const BAG_PAD := 4
@@ -40,8 +44,9 @@ const QUICK_SEP := 2
 const WEIGHT_ROW_H := 16
 ## Preview panel width ≤ four quick slots (+ gaps).
 const PREVIEW_COL_W := QUICK_COUNT * QUICK_SLOT.x + float(QUICK_COUNT - 1) * QUICK_ROW_SEP
-## Fixed bag cell size (do not shrink to fill tall bag — bag height hugs the grid).
+## Fixed bag + locker cell size (same visual slot in both grids).
 const CELL_FIXED := 50
+const LOCKER_CELL := CELL_FIXED
 ## Cool steel palette (STALKER-like) — no warm brown chrome.
 const COL_LABEL := Color(0.78, 0.80, 0.84)
 const COL_TITLE := Color(0.90, 0.91, 0.93)
@@ -58,16 +63,21 @@ const PREVIEW_YAW_SENS := 0.012
 const PREVIEW_PLATFORM_H := 0.14
 const PREVIEW_PLATFORM_SIDE := 1.35
 const PREVIEW_PLATFORM_SIZE := Vector3(PREVIEW_PLATFORM_SIDE, PREVIEW_PLATFORM_H, PREVIEW_PLATFORM_SIDE)
-## Sink feet into pedestal so boots don't hover above the slab.
-const PREVIEW_UNIT_SINK := 0.08
-## Lift pedestal+unit in frame (world Y).
-const PREVIEW_PIVOT_Y := 0.18
+## Sink feet slightly into pedestal so boots plant on the slab.
+const PREVIEW_UNIT_SINK := 0.06
+## Pedestal+unit vertical placement in frame (world Y).
+const PREVIEW_PIVOT_Y := 0.06
 
 var _nick: String = ""
 var _inventory: Array = []
 var _equipped: Dictionary = {"primary": "", "secondary": "", "armor": ""}
 ## Quick-access slots (battle hotbar later): item_id or "".
 var _quick: Array = ["", "", "", ""]
+var _player_level: int = 1
+var _player_stats: Dictionary = {
+	"strength": 5, "agility": 5, "endurance": 5,
+	"intuition": 5, "accuracy": 5, "intelligence": 5,
+}
 var _weight: float = 0.0
 var _carry: float = 50.0
 var _overweight: bool = false
@@ -98,6 +108,11 @@ var _preview_dragging: bool = false
 var _equip_col: VBoxContainer
 var _quick_box: VBoxContainer
 var _unit: ZZUnitView
+var _locker_enabled: bool = true
+var _locker_col: VBoxContainer
+var _locker_grid: GridContainer
+var _locker_panel: PanelContainer
+var _body: HBoxContainer
 
 
 func _ready() -> void:
@@ -112,8 +127,9 @@ func _ready() -> void:
 	_build()
 
 
-func open_for(nick: String) -> void:
+func open_for(nick: String, locker_enabled: bool = true) -> void:
 	_nick = nick
+	set_locker_enabled(locker_enabled)
 	if _nick_label != null:
 		_nick_label.text = nick if nick != "" else "—"
 	visible = true
@@ -133,6 +149,13 @@ func open_for(nick: String) -> void:
 	## Second pass after shell/bag sizes settle — cells fill without bottom void.
 	call_deferred("_refresh_grid")
 	call_deferred("_bind_preview_texture")
+
+
+func set_locker_enabled(enabled: bool) -> void:
+	_locker_enabled = enabled
+	if _locker_col != null:
+		_locker_col.visible = enabled
+	call_deferred("_fit_shell_to_left")
 
 
 func close() -> void:
@@ -158,6 +181,11 @@ func apply_state(data: Dictionary) -> void:
 	_weight = float(data.get("inventory_weight", 0.0))
 	_carry = float(data.get("carry_weight", 50.0))
 	_overweight = bool(data.get("overweight", false))
+	_player_level = maxi(1, int(data.get("level", _player_level)))
+	var stats_v: Variant = data.get("stats", {})
+	if typeof(stats_v) == TYPE_DICTIONARY and not (stats_v as Dictionary).is_empty():
+		_player_stats = (stats_v as Dictionary).duplicate()
+	ZZItemTooltip.set_player_context(_player_level, _player_stats)
 	if visible:
 		_refresh()
 
@@ -209,17 +237,17 @@ func _build() -> void:
 	root.add_child(root_vbox)
 
 	# --- Body ---
-	var body := HBoxContainer.new()
-	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body.add_theme_constant_override("separation", 8)
-	root_vbox.add_child(body)
+	_body = HBoxContainer.new()
+	_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_body.add_theme_constant_override("separation", 8)
+	root_vbox.add_child(_body)
 
 	# Left: compact header + stage + quick — shrink to content (no expand void).
 	_left_col = VBoxContainer.new()
 	_left_col.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	_left_col.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	_left_col.add_theme_constant_override("separation", COL_SEP)
-	body.add_child(_left_col)
+	_body.add_child(_left_col)
 
 	## Nick only — fixed HEADER_H so stage top matches bag top.
 	var left_header := Control.new()
@@ -342,7 +370,7 @@ func _build() -> void:
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	right.add_theme_constant_override("separation", 0)
-	body.add_child(right)
+	_body.add_child(right)
 
 	var bag_header := Control.new()
 	bag_header.custom_minimum_size = Vector2(0, HEADER_H)
@@ -435,6 +463,55 @@ func _build() -> void:
 	_weight_label.add_theme_color_override("font_color", COL_TITLE)
 	_weight_label.text = "0 / 50 ед."
 	weight_row.add_child(_weight_label)
+
+	## Locker: infinite catalog warehouse (lobby only).
+	_locker_col = VBoxContainer.new()
+	_locker_col.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_locker_col.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	_locker_col.add_theme_constant_override("separation", 0)
+	_body.add_child(_locker_col)
+	var locker_header := Control.new()
+	locker_header.custom_minimum_size = Vector2(0, HEADER_H)
+	locker_header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_locker_col.add_child(locker_header)
+	var locker_title := Label.new()
+	locker_title.text = "Шкафчик"
+	locker_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	locker_title.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	locker_title.add_theme_font_size_override("font_size", 12)
+	locker_title.add_theme_color_override("font_color", COL_TITLE)
+	locker_title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	locker_title.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	locker_title.offset_bottom = -3.0
+	locker_header.add_child(locker_title)
+	_locker_panel = PanelContainer.new()
+	_locker_panel.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_locker_panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	_locker_panel.add_theme_stylebox_override("panel", _panel_style(
+		COL_BAG_BG,
+		COL_BAG_BORDER,
+		1, 0
+	))
+	_locker_col.add_child(_locker_panel)
+	var locker_margin := MarginContainer.new()
+	locker_margin.add_theme_constant_override("margin_left", BAG_PAD)
+	locker_margin.add_theme_constant_override("margin_top", BAG_PAD)
+	locker_margin.add_theme_constant_override("margin_right", BAG_PAD)
+	locker_margin.add_theme_constant_override("margin_bottom", BAG_PAD)
+	_locker_panel.add_child(locker_margin)
+	var locker_scroll := ScrollContainer.new()
+	locker_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	locker_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	locker_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	locker_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	locker_scroll.clip_contents = true
+	locker_margin.add_child(locker_scroll)
+	_style_thin_scrollbar(locker_scroll)
+	_locker_grid = GridContainer.new()
+	_locker_grid.columns = LOCKER_COLS
+	_locker_grid.add_theme_constant_override("h_separation", CELL_SEP)
+	_locker_grid.add_theme_constant_override("v_separation", CELL_SEP)
+	locker_scroll.add_child(_locker_grid)
 
 	## Close on shell corner — visible hover (not fully transparent).
 	_close_btn = Button.new()
@@ -672,12 +749,24 @@ func _cell_style() -> StyleBoxFlat:
 	return s
 
 
+func _locker_content_size() -> Vector2:
+	var g := Vector2i(
+		LOCKER_CELL * LOCKER_COLS + CELL_SEP * (LOCKER_COLS - 1),
+		LOCKER_CELL * GRID_ROWS + CELL_SEP * (GRID_ROWS - 1)
+	)
+	return Vector2(float(g.x + BAG_PAD * 2 + 2), float(BAG_PAD + g.y + BAG_PAD))
+
+
 func _fit_shell_to_left() -> void:
 	## Bag is authority (fixed 4×5). Preview height fills so left bottom = bag bottom — no voids.
 	if _shell == null or _left_col == null:
 		return
 	var bag := _bag_content_size()
 	_apply_bag_fixed_size()
+	var locker := _locker_content_size() if _locker_enabled else Vector2.ZERO
+	if _locker_enabled and _locker_panel != null:
+		_locker_panel.custom_minimum_size = locker
+		_locker_panel.size = locker
 
 	var quick_h := float(QUICK_SLOT.y + 12)
 	if _quick_box != null:
@@ -701,6 +790,8 @@ func _fit_shell_to_left() -> void:
 	## Prefer bag height; only grow if equip column truly needs more.
 	var h := maxf(left_h, right_h) + 12.0
 	var w := 16.0 + left_w + 8.0 + bag.x
+	if _locker_enabled:
+		w += 8.0 + locker.x
 	w = minf(w, SHELL_W)
 	_shell.custom_minimum_size = Vector2(w, h)
 	_shell.size = Vector2(w, h)
@@ -743,28 +834,32 @@ func _ensure_preview() -> void:
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.035, 0.038, 0.045, 1.0)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.48, 0.50, 0.54)
-	env.ambient_light_energy = 0.35
+	env.ambient_light_color = Color(0.48, 0.50, 0.56)
+	env.ambient_light_energy = 0.38
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	env_node.environment = env
 	world.add_child(env_node)
-	## Key from the side — frontal light blew out the jacket/helmet.
+	## Studio key: front-high, slight bias (~28°). Side key (~90°) hides half the mesh.
+	## Camera looks −Z from +Z; identity light also −Z = front. Pitch down + small yaw.
 	var key := DirectionalLight3D.new()
-	key.rotation_degrees = Vector3(-35, 70, 0)
-	key.light_color = Color(1.0, 0.96, 0.90)
-	key.light_energy = 1.15
+	key.rotation_degrees = Vector3(-42, 28, 0)
+	key.light_color = Color(1.0, 0.97, 0.92)
+	key.light_energy = 1.05
 	key.shadow_enabled = true
-	key.shadow_blur = 1.5
+	key.shadow_blur = 1.8
 	key.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
 	world.add_child(key)
 	var fill := DirectionalLight3D.new()
-	fill.rotation_degrees = Vector3(-10, -100, 0)
-	fill.light_color = Color(0.70, 0.76, 0.90)
-	fill.light_energy = 0.40
+	fill.rotation_degrees = Vector3(-18, -40, 0)
+	fill.light_color = Color(0.72, 0.78, 0.92)
+	fill.light_energy = 0.48
+	fill.shadow_enabled = false
 	world.add_child(fill)
 	var rim := DirectionalLight3D.new()
-	rim.rotation_degrees = Vector3(-5, 160, 0)
-	rim.light_energy = 0.35
+	rim.rotation_degrees = Vector3(-12, 165, 0)
+	rim.light_color = Color(0.95, 0.92, 0.88)
+	rim.light_energy = 0.30
+	rim.shadow_enabled = false
 	world.add_child(rim)
 	## Pivot: drag-yaw; reset to 0 every inventory open.
 	_preview_pivot = Node3D.new()
@@ -812,6 +907,7 @@ func _make_preview_platform() -> Node3D:
 func _refresh() -> void:
 	_refresh_slots()
 	_refresh_grid()
+	_refresh_locker()
 	if _weight_label != null:
 		var carry := maxf(1.0, _carry)
 		var frac := _weight / carry
@@ -913,6 +1009,92 @@ func _is_slotted(item_id: String) -> bool:
 	return false
 
 
+func _default_withdraw_qty(item_id: String) -> int:
+	if _item_type(item_id) == "ammo":
+		return AMMO_STACK_QTY
+	return 1
+
+
+func _default_deposit_qty(item_id: String) -> int:
+	var have := _stack_qty(item_id)
+	if have <= 0:
+		return 0
+	if _item_type(item_id) == "ammo":
+		return mini(AMMO_STACK_QTY, have)
+	return 1
+
+
+func _request_withdraw(item_id: String) -> void:
+	if not _locker_enabled or item_id == "":
+		return
+	withdraw_requested.emit(item_id, _default_withdraw_qty(item_id))
+
+
+func _request_deposit(item_id: String) -> void:
+	if not _locker_enabled or item_id == "" or _is_slotted(item_id):
+		return
+	var qty := _default_deposit_qty(item_id)
+	if qty <= 0:
+		return
+	deposit_requested.emit(item_id, qty)
+
+
+func _refresh_locker() -> void:
+	if _locker_grid == null:
+		return
+	for c in _locker_grid.get_children():
+		c.queue_free()
+	if not _locker_enabled:
+		return
+	var items: Array = ZZLos.catalog_items()
+	var side := LOCKER_CELL
+	var sz := Vector2(side, side)
+	for entry in items:
+		if typeof(entry) != TYPE_DICTIONARY:
+			continue
+		var id := str(entry.get("id", ""))
+		if id == "":
+			continue
+		var t := str(entry.get("type", ""))
+		if t != "weapon" and t != "armor" and t != "medkit" and t != "ammo":
+			continue
+		var cell := Control.new()
+		cell.custom_minimum_size = sz
+		cell.size = sz
+		_locker_grid.add_child(cell)
+		var btn := ZZInvDragItem.new()
+		btn.host = self
+		btn.item_id = id
+		btn.qty = _default_withdraw_qty(id)
+		btn.from_slot = "locker"
+		btn.accept_slot = "locker"
+		btn.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		btn.text = ""
+		btn.focus_mode = Control.FOCUS_NONE
+		btn.expand_icon = false
+		btn.icon = null
+		btn.mouse_filter = Control.MOUSE_FILTER_STOP
+		btn.tooltip_text = " "
+		_style_slot_button(btn)
+		## Dim unique weapon/armor already in bag.
+		if (t == "weapon" or t == "armor") and _stack_qty(id) > 0:
+			btn.modulate = Color(1, 1, 1, 0.45)
+		btn.pressed.connect(func(): _request_withdraw(id))
+		cell.add_child(btn)
+		var icon := TextureRect.new()
+		icon.name = "ItemIcon"
+		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		icon.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		icon.offset_left = 2
+		icon.offset_top = 2
+		icon.offset_right = -2
+		icon.offset_bottom = -2
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon.texture = _icon_for(id, side - 4, side - 4)
+		btn.add_child(icon)
+
+
 func _refresh_grid() -> void:
 	if _grid == null:
 		return
@@ -942,7 +1124,10 @@ func _refresh_grid() -> void:
 	if _shell != null and _left_col != null:
 		var bag := _bag_content_size()
 		var left_w := maxf(_left_col.get_combined_minimum_size().x, _left_col.size.x)
-		var shell_w := minf(16.0 + left_w + 8.0 + bag.x, SHELL_W)
+		var shell_w := 16.0 + left_w + 8.0 + bag.x
+		if _locker_enabled:
+			shell_w += 8.0 + _locker_content_size().x
+		shell_w = minf(shell_w, SHELL_W)
 		_shell.custom_minimum_size.x = shell_w
 		_shell.size.x = shell_w
 
@@ -975,6 +1160,12 @@ func _refresh_grid() -> void:
 		btn.mouse_filter = Control.MOUSE_FILTER_STOP
 		btn.tooltip_text = " " if id2 != "" else ""
 		_style_slot_button(btn)
+		if id2 != "" and _locker_enabled:
+			btn.gui_input.connect(func(ev: InputEvent) -> void:
+				if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_RIGHT:
+					_request_deposit(id2)
+					btn.accept_event()
+			)
 		cell.add_child(btn)
 
 		if id2 != "":
@@ -1175,17 +1366,41 @@ func can_drop_on_slot(slot_name: String, data: Dictionary) -> bool:
 	var from_slot := str(data.get("from_slot", ""))
 	if from_slot == slot_name:
 		return false
+	if slot_name == "locker":
+		## Bag → locker deposit (not from equip/quick — unequip first).
+		return _locker_enabled and from_slot == "" and not _is_slotted(item_id)
 	var t := _item_type(item_id)
 	match slot_name:
 		"primary", "secondary":
-			return t == "weapon"
+			return t == "weapon" and _meets_item_reqs(item_id)
 		"armor":
-			return t == "armor"
+			return t == "armor" and _meets_item_reqs(item_id)
 		_:
 			if _is_quick_slot(slot_name):
 				## Battle hotbar: consumables / ammo (not weapons or armor).
 				return t == "medkit" or t == "ammo"
 			return false
+
+
+func _meets_item_reqs(item_id: String) -> bool:
+	var p: Variant = ZZLos.item_def(item_id).get("params", {})
+	if typeof(p) != TYPE_DICTIONARY:
+		return true
+	if _player_level < int(p.get("min_level", 1)):
+		return false
+	var keys := [
+		["req_strength", "strength"],
+		["req_agility", "agility"],
+		["req_endurance", "endurance"],
+		["req_intuition", "intuition"],
+		["req_accuracy", "accuracy"],
+		["req_intelligence", "intelligence"],
+	]
+	for pair in keys:
+		var need := int(p.get(pair[0], 0))
+		if need > 0 and int(_player_stats.get(pair[1], 5)) < need:
+			return false
+	return true
 
 
 func can_drop_on_bag(data: Variant) -> bool:
@@ -1223,6 +1438,9 @@ func _set_slot_item(slot_name: String, item_id: String) -> void:
 func drop_on_slot(slot_name: String, data: Dictionary) -> void:
 	var item_id := str(data.get("item_id", ""))
 	if not can_drop_on_slot(slot_name, data):
+		return
+	if slot_name == "locker":
+		_request_deposit(item_id)
 		return
 	var from_slot := str(data.get("from_slot", ""))
 	var prev: String = _get_slot_item(slot_name)

@@ -16,6 +16,9 @@ var _drag_dimmed: bool = false
 func _get_drag_data(_at_position: Vector2) -> Variant:
 	if host == null or item_id == "":
 		return null
+	## Locker cells: click to withdraw — no drag.
+	if from_slot == "locker":
+		return null
 	var tex: Texture2D = icon
 	var item_icon := get_node_or_null("ItemIcon") as TextureRect
 	if item_icon != null and item_icon.texture != null:

@@ -57,23 +57,9 @@ static func tex_tight(item_id: String) -> Texture2D:
 
 
 static func path_for(item_id: String) -> String:
-	var base := ""
-	match item_id:
-		"kar98":
-			base = "icon_rifle"
-		"glock17":
-			base = "icon_pistol"
-		"medkit_small":
-			base = "icon_medkit"
-		"ammo_7.62mm":
-			base = "icon_ammo_rifle"
-		"ammo_9mm":
-			base = "icon_ammo_pistol"
-		"leather_armor":
-			base = "icon_vest"
-		_:
-			return ""
-	return DIR + base + ".png"
+	if item_id == "":
+		return ""
+	return DIR + "icon_" + item_id + ".png"
 
 
 static func shell_bg() -> Texture2D:

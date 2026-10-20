@@ -90,6 +90,10 @@ func _ready() -> void:
 		ui.set_reload_cost(battle.reload_cost)
 		ui.set_shoot_cost(battle.shoot_cost)
 		_refresh_consumable_btns()
+		_refresh_fire_mode_hint()
+	)
+	battle.fire_mode_changed.connect(func(_mode: String):
+		_refresh_fire_mode_hint()
 	)
 
 	ui.continue_pressed.connect(_on_continue)
@@ -100,6 +104,7 @@ func _ready() -> void:
 	ui.medkit_pressed.connect(battle.request_medkit)
 	ui.reload_pressed.connect(battle.request_reload)
 	ui.weapon_slot_pressed.connect(battle.request_weapon_slot)
+	ui.quick_slot_pressed.connect(_on_quick_slot_pressed)
 	ui.chat_submitted.connect(func(text: String, channel: String):
 		battle.send_chat(text, channel)
 	)
@@ -110,6 +115,10 @@ func _ready() -> void:
 	ui.battle_inventory_pressed.connect(battle.request_inventory_open)
 	ui.inventory_equip_requested.connect(battle.request_inventory_equip)
 	ui.inventory_unequip_requested.connect(battle.request_inventory_unequip)
+	ui.inventory_withdraw_requested.connect(battle.request_inventory_withdraw)
+	ui.inventory_deposit_requested.connect(battle.request_inventory_deposit)
+	ui.set_level_requested.connect(battle.request_set_level)
+	ui.spend_stat_requested.connect(battle.request_spend_stat)
 	battle.inventory_state_received.connect(ui.apply_inventory_state)
 	battle.battle_inventory_opened.connect(ui.open_battle_inventory)
 
@@ -504,13 +513,48 @@ func _refresh_quick_bar() -> void:
 	)
 
 
+func _refresh_fire_mode_hint() -> void:
+	var mode := battle.fire_mode
+	var label := "Одиночный"
+	if mode == "burst":
+		label = "Очередь"
+	elif mode == "duplet":
+		label = "Дуплет"
+	## Show on shoot cost / weapon area via status if available.
+	if ui.has_method("set_fire_mode_hint"):
+		ui.set_fire_mode_hint(label)
+	elif ui.get("battle_status") != null:
+		pass
+
+
+func _on_quick_slot_pressed(slot_index: int) -> void:
+	if slot_index < 0 or slot_index >= battle.local_quick.size():
+		return
+	var id := str(battle.local_quick[slot_index])
+	if id == "":
+		return
+	if str(ZZLos.item_def(id).get("type", "")) == "ammo":
+		battle.request_select_ammo(id)
+
+
+func _ammo_fits_active_weapon(ammo_id: String) -> bool:
+	if battle.local_active_weapon_idx < 0 or battle.local_active_weapon_idx >= battle.local_weapons.size():
+		return false
+	var w: Variant = battle.local_weapons[battle.local_active_weapon_idx]
+	if typeof(w) != TYPE_DICTIONARY:
+		return false
+	return ZZLos.ammo_fits_weapon(ammo_id, str(w.get("id", "")))
+
+
 func _refresh_consumable_btns() -> void:
 	var can_plan := not battle.input_locked and battle.in_battle
 	var ap_medkit := can_plan and battle.local_ap >= battle.medkit_cost
 	var ap_reload := can_plan and battle.local_ap >= battle.reload_cost
 	var ap_switch := can_plan and battle.local_ap >= battle.switch_weapon_cost
 	var mag_needs := (
-		battle.local_ammo_in_mag < battle.local_mag_size and battle.local_ammo_reserve > 0
+		battle.local_mag_size > 0
+		and battle.local_ammo_in_mag < battle.local_mag_size
+		and battle.local_ammo_reserve > 0
 	)
 	# Per quick slot: medkit needs AP+charges; empty/non-usable dimmed.
 	for i in range(4):
@@ -524,16 +568,24 @@ func _refresh_consumable_btns() -> void:
 		if t == "medkit":
 			var ok := ap_medkit and battle.local_medkits > 0
 			ui.set_quick_affordance(i, ok, ok)
+		elif t == "ammo":
+			var can_sel := can_plan and _ammo_fits_active_weapon(id)
+			ui.set_quick_affordance(i, can_sel, can_sel)
 		else:
-			## Ammo / other: display only for now.
 			ui.set_quick_affordance(i, false, true)
 	ui.set_medkit_affordance(
 		ap_medkit and battle.local_medkits > 0,
 		ap_medkit and battle.local_medkits > 0
 	)
-	# Full mag: stay bright while planning — gray would look like "no AP".
-	var look_reload := can_plan if not mag_needs else ap_reload
-	ui.set_reload_affordance(ap_reload and mag_needs, look_reload)
+	# Active card: bright while planning. Dim only when mag needs reload and no AP
+	# (full mag / melee stay bright — gray would look like “no AP” / inactive).
+	var melee := false
+	if battle.local_active_weapon_idx >= 0 and battle.local_active_weapon_idx < battle.local_weapons.size():
+		var aw: Variant = battle.local_weapons[battle.local_active_weapon_idx]
+		if typeof(aw) == TYPE_DICTIONARY:
+			melee = bool(aw.get("melee", false)) or ZZLos.is_melee_weapon(str(aw.get("id", "")))
+	var look_active := can_plan if (melee or not mag_needs) else ap_reload
+	ui.set_reload_affordance(ap_reload and mag_needs and not melee, look_active)
 	ui.set_switch_weapon_affordance(ap_switch)
 
 

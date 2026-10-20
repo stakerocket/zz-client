@@ -6,13 +6,17 @@ const MOVE_DURATION := 0.34
 const MOVE_DURATION_RUN := MOVE_DURATION * 0.5
 const CAPSULE_HEIGHT := 2.25
 const CAPSULE_RADIUS := 0.38
-const MODEL_SCENE := preload("res://assets/units/rider.glb")
+const MODEL_SCENE := preload("res://assets/units/man.glb")
 const MODEL_SCALE := 2.5
 const MODEL_YAW_OFFSET := 0.0
-const ANIM_IDLE := "idle.rifle"
-const ANIM_RUN := "run.rifle"
-const ANIM_FIRE := "fire.rifle"
-const ANIM_DEATH := "death.rifle"
+const ANIM_IDLE := "idle"
+const ANIM_WALK := "walk"
+const ANIM_RUN := "run"
+const ANIM_CROUCH_IDLE := "crouching_idle"
+const ANIM_CROUCH_RUN := "crouching_run"
+const ANIM_HIDE := "hiding"
+const ANIM_FIRE := "idle"
+const ANIM_DEATH := "death"
 const HP_BAR_W := 1.35
 const HP_BAR_H := 0.16
 const FONT_NICK := 70
@@ -38,7 +42,11 @@ var _hips_bone: int = -1
 var _hips_rest_xz: Vector2 = Vector2.ZERO
 var _meshes: Array[MeshInstance3D] = []
 var _anim_idle: String = ""
+var _anim_walk: String = ""
 var _anim_run: String = ""
+var _anim_crouch_idle: String = ""
+var _anim_crouch_run: String = ""
+var _anim_hide: String = ""
 var _anim_fire: String = ""
 var _anim_death_rifle: String = ""
 var _anim_death_plain: String = ""
@@ -118,17 +126,33 @@ func _spawn_model() -> void:
 	_skeleton = _find_skeleton(_model)
 	_cache_hips_bone()
 	if _anim != null:
+		## Sanitize "crouching _idle" → crouching_idle, then bind clips.
+		_prepare_locomotion_anims()
 		_anim_idle = _resolve_anim(ANIM_IDLE, "idle")
+		_anim_walk = _resolve_anim(ANIM_WALK, "walk")
+		if _anim_walk == "":
+			_anim_walk = _anim_idle
 		_anim_run = _resolve_anim(ANIM_RUN, "run")
-		_anim_fire = _resolve_anim(ANIM_FIRE, "fire")
+		if _anim_run == "":
+			_anim_run = _anim_walk
+		_anim_crouch_idle = _resolve_anim(ANIM_CROUCH_IDLE, "crouching_idle")
+		if _anim_crouch_idle == "":
+			_anim_crouch_idle = _anim_idle
+		_anim_crouch_run = _resolve_anim(ANIM_CROUCH_RUN, "crouching_run")
+		if _anim_crouch_run == "":
+			_anim_crouch_run = _anim_crouch_idle
+		_anim_hide = _resolve_anim(ANIM_HIDE, "hiding")
+		if _anim_hide == "":
+			_anim_hide = _anim_crouch_idle
+		## Fire clip TBD — fall back to idle.
+		_anim_fire = _anim_idle
 		_anim_death_rifle = _resolve_anim_named(ANIM_DEATH)
 		_anim_death_plain = _resolve_anim_named("death")
-		_prepare_locomotion_anims()
 		# Advance manually so we can kill Hips root-motion after each pose.
 		_anim.callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
 		_anim.active = true
 	if _meshes.is_empty():
-		push_warning("ZZUnitView: rider.glb has no meshes, falling back to capsule")
+		push_warning("ZZUnitView: man.glb has no meshes, falling back to capsule")
 		_spawn_capsule_fallback()
 
 
@@ -151,10 +175,21 @@ func _polish_model_meshes() -> void:
 				bm.metallic_specular = 0.55
 
 
+func _sanitize_anim_key(key: String) -> String:
+	## "crouching _idle" / "crouching  _run" → crouching_idle / crouching_run
+	var s := key.strip_edges()
+	while s.contains("  "):
+		s = s.replace("  ", " ")
+	s = s.replace(" _", "_").replace("_ ", "_").replace(" ", "_")
+	return s
+
+
 func _prepare_locomotion_anims() -> void:
 	for lib_name in _anim.get_animation_library_list():
 		var lib: AnimationLibrary = _anim.get_animation_library(lib_name)
-		for anim_key in lib.get_animation_list():
+		## Snapshot keys — we may rename while iterating.
+		var keys: Array = lib.get_animation_list()
+		for anim_key in keys:
 			var src := lib.get_animation(anim_key)
 			if src == null:
 				continue
@@ -167,8 +202,12 @@ func _prepare_locomotion_anims() -> void:
 				dup.loop_mode = Animation.LOOP_NONE
 			else:
 				dup.loop_mode = Animation.LOOP_LINEAR
+			var clean := _sanitize_anim_key(String(anim_key))
 			lib.remove_animation(anim_key)
-			lib.add_animation(anim_key, dup)
+			## Avoid clobber if clean name already exists from a prior pass.
+			if lib.has_animation(clean):
+				lib.remove_animation(clean)
+			lib.add_animation(clean, dup)
 
 
 func _strip_hips_root_motion_tracks(anim: Animation) -> void:
@@ -286,41 +325,71 @@ func _resolve_anim_named(preferred: String) -> String:
 
 
 func _resolve_anim(preferred: String, hint: String) -> String:
-	var exact := _resolve_anim_named(preferred)
-	if exact != "":
-		return exact
-	if _anim == null:
+	if preferred != "":
+		var exact := _resolve_anim_named(preferred)
+		if exact != "":
+			return exact
+	if _anim == null or hint == "":
 		return ""
+	var hint_l := hint.to_lower()
 	for n in _anim.get_animation_list():
-		if String(n).to_lower().contains(hint):
-			return String(n)
-	var names := _anim.get_animation_list()
-	if names.size() > 0:
-		return String(names[0])
+		var s := String(n)
+		var sl := s.to_lower()
+		## Prefer clip whose leaf name contains the hint (skip junk Layer0).
+		if sl.contains("layer"):
+			continue
+		if sl.contains(hint_l) or sl.get_file().contains(hint_l):
+			return s
 	return ""
 
 
 func _is_playing_anim(anim_name: String) -> bool:
-	if _anim == null or anim_name == "":
+	if _anim == null or anim_name == "" or not _anim.is_playing():
 		return false
-	return _anim.is_playing() and String(_anim.current_animation) == anim_name
+	var cur := String(_anim.current_animation)
+	return cur == anim_name or cur.ends_with("/" + anim_name) or cur.get_file() == anim_name
+
+
+func _idle_clip_for_posture() -> String:
+	match posture:
+		"sit":
+			return _anim_crouch_idle
+		"cover":
+			return _anim_hide
+		_:
+			return _anim_idle
+
+
+func _move_clip_for_posture() -> String:
+	match posture:
+		"sit":
+			return _anim_crouch_run
+		"cover":
+			## Low profile: crouch-run while shifting in cover.
+			return _anim_crouch_run
+		"run":
+			return _anim_run
+		_:
+			return _anim_walk
 
 
 func _play_idle() -> void:
-	if _anim == null or _anim_idle == "" or is_dead or is_dying:
+	var clip := _idle_clip_for_posture()
+	if _anim == null or clip == "" or is_dead or is_dying:
 		return
-	if _is_playing_anim(_anim_idle):
+	if _is_playing_anim(clip):
 		return
-	_anim.play(_anim_idle)
+	_anim.play(clip)
 
 
-func _play_run() -> void:
-	if _anim == null or _anim_run == "" or is_dead or is_dying:
+func _play_locomotion() -> void:
+	var clip := _move_clip_for_posture()
+	if _anim == null or clip == "" or is_dead or is_dying:
 		return
 	# Critical: StringName != String would restart the clip every hex.
-	if _is_playing_anim(_anim_run):
+	if _is_playing_anim(clip):
 		return
-	_anim.play(_anim_run)
+	_anim.play(clip)
 
 
 func _anim_length(anim_name: String) -> float:
@@ -585,7 +654,7 @@ func animate_move_to(world_pos: Vector3, with_sfx: bool = false, stop_at_end: bo
 	_feet_y = world_pos.y
 	var target := Vector3(world_pos.x, _feet_y, world_pos.z)
 	_face_toward(target)
-	_play_run()
+	_play_locomotion()
 	var dur := MOVE_DURATION_RUN if posture == "run" else MOVE_DURATION
 	var tw := create_tween()
 	_move_tween = tw
@@ -660,6 +729,10 @@ func set_posture(value: String) -> void:
 			posture = "stand"
 	if not is_dying and not is_dead:
 		_apply_posture_visual()
+		if is_moving:
+			_play_locomotion()
+		else:
+			_play_idle()
 	_refresh_label()
 
 
@@ -807,6 +880,10 @@ func _refresh_aim_visual() -> void:
 	elif not bool(info.get("can_shoot", true)):
 		col = Color(0.85, 0.7, 0.25, 0.95)
 		text = "—"
+	elif info.has("melee_reach") and not bool(info.get("melee_reach", true)):
+		## Knife planned far: server skips unless target closes — show reach hint, not fake %.
+		col = Color(0.85, 0.75, 0.35, 0.95)
+		text = "даль"
 	else:
 		text = "%d%%" % int(round(float(info.get("chance", 0.0)) * 100.0))
 		col = Color(0.95, 0.35, 0.3, 0.95)
@@ -826,15 +903,7 @@ func _refresh_aim_visual() -> void:
 
 
 func _apply_posture_visual() -> void:
+	## Real Mixamo clips carry posture now — keep uniform scale.
 	if _model_root == null:
 		return
-	var s := MODEL_SCALE
-	match posture:
-		"sit":
-			_model_root.scale = Vector3(s, s * 0.72, s)
-		"cover":
-			_model_root.scale = Vector3(s * 1.05, s * 0.82, s * 0.95)
-		"run":
-			_model_root.scale = Vector3(s * 1.02, s * 0.96, s * 1.02)
-		_:
-			_model_root.scale = Vector3.ONE * s
+	_model_root.scale = Vector3.ONE * MODEL_SCALE

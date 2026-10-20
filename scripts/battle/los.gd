@@ -6,7 +6,7 @@ class_name ZZLos
 ## No balance hardcoding — empty until apply_rules().
 
 static var _rules: Dictionary = {}
-static var _item_catalog: Dictionary = {} # { items: [], default_loadout: [], by_id: {} }
+static var _item_catalog: Dictionary = {} # { items: [], by_id: {} }
 
 # even row / odd row neighbor deltas — must match server oddrNeighborDirs.
 const NEIGHBOR_DIRS := [
@@ -62,7 +62,6 @@ static func apply_item_catalog(raw: Variant) -> void:
 			by_id[id] = it
 	_item_catalog = {
 		"items": items,
-		"default_loadout": cat.get("default_loadout", []),
 		"by_id": by_id,
 	}
 	# Prefer first catalog weapon / medkit params (ids are data-driven).
@@ -103,8 +102,8 @@ static func has_item_catalog() -> bool:
 	return not _item_catalog.is_empty()
 
 
-static func default_loadout() -> Array:
-	return _item_catalog.get("default_loadout", [])
+static func catalog_items() -> Array:
+	return _item_catalog.get("items", [])
 
 
 static func item_def(item_id: String) -> Dictionary:
@@ -113,33 +112,97 @@ static func item_def(item_id: String) -> Dictionary:
 	return d if typeof(d) == TYPE_DICTIONARY else {}
 
 
-static func compute_loadout_weight() -> float:
-	if not has_item_catalog():
-		return 0.0
-	var sum := 0.0
-	var loadout: Array = _item_catalog.get("default_loadout", [])
-	for e in loadout:
-		if typeof(e) != TYPE_DICTIONARY:
-			continue
-		var id := str(e.get("item_id", ""))
-		var qty := int(e.get("qty", 0))
-		var def := item_def(id)
-		if def.is_empty() or qty <= 0:
-			continue
-		sum += float(def.get("weight", 0.0)) * float(qty)
-	return sum
+static func weapon_caliber(weapon_id: String) -> String:
+	var p: Variant = item_def(weapon_id).get("params", {})
+	if typeof(p) == TYPE_DICTIONARY:
+		return str(p.get("caliber", ""))
+	return ""
 
 
-static func compute_effective_max_ap(strength: int = -1, agility: int = -1, endurance: int = -1) -> int:
-	var max_ap := compute_max_ap(strength, agility, endurance)
-	var carry := float(compute_carry_weight(strength if strength >= 0 else default_stat()))
-	var inv_w := compute_loadout_weight()
-	if inv_w <= carry:
-		return max_ap
-	var frac := rule_f("overweight_ap_frac")
-	if frac <= 0.0:
-		frac = 0.2
-	return maxi(0, int(floor(float(max_ap) * frac)))
+static func ammo_caliber(ammo_id: String) -> String:
+	var p: Variant = item_def(ammo_id).get("params", {})
+	if typeof(p) != TYPE_DICTIONARY:
+		return ""
+	var c := str(p.get("caliber", ""))
+	if c != "":
+		return c
+	## Legacy: weapon_id → that weapon's caliber.
+	var wid := str(p.get("weapon_id", ""))
+	if wid != "":
+		return weapon_caliber(wid)
+	return ""
+
+
+static func ammo_id_for_weapon(weapon_id: String) -> String:
+	if weapon_id == "":
+		return ""
+	var cal := weapon_caliber(weapon_id)
+	var items: Array = _item_catalog.get("items", [])
+	for it in items:
+		if typeof(it) != TYPE_DICTIONARY:
+			continue
+		if str(it.get("type", "")) != "ammo":
+			continue
+		var id := str(it.get("id", ""))
+		if cal != "" and ammo_caliber(id) == cal:
+			return id
+		## Legacy fallback.
+		var params: Variant = it.get("params", {})
+		if typeof(params) == TYPE_DICTIONARY and str(params.get("weapon_id", "")) == weapon_id:
+			return id
+	return ""
+
+
+static func ammo_fits_weapon(ammo_id: String, weapon_id: String) -> bool:
+	if ammo_id == "" or weapon_id == "":
+		return false
+	var wp: Variant = item_def(weapon_id).get("params", {})
+	if typeof(wp) == TYPE_DICTIONARY and bool(wp.get("melee", false)):
+		return false
+	if typeof(wp) == TYPE_DICTIONARY and wp.has("ammo_ids"):
+		var allowed: Variant = wp.get("ammo_ids", [])
+		if typeof(allowed) == TYPE_ARRAY:
+			for a in allowed:
+				if str(a) == ammo_id:
+					return true
+			return false
+	var cal := weapon_caliber(weapon_id)
+	if cal == "":
+		return false
+	return ammo_caliber(ammo_id) == cal
+
+
+static func is_melee_weapon(weapon_id: String) -> bool:
+	var wp: Variant = item_def(weapon_id).get("params", {})
+	return typeof(wp) == TYPE_DICTIONARY and bool(wp.get("melee", false))
+
+
+## Ammo fixed damage (params.damage; legacy damage_min fallback).
+static func ammo_damage(ammo_id: String) -> int:
+	if ammo_id == "":
+		return 0
+	var ap: Variant = item_def(ammo_id).get("params", {})
+	if typeof(ap) != TYPE_DICTIONARY:
+		return 0
+	var d := int(ap.get("damage", 0))
+	if d <= 0:
+		d = int(ap.get("damage_min", 0))
+	return maxi(0, d)
+
+
+## Catalog body damage + fixed loaded ammo (or first ammo of caliber if ammo_id empty).
+static func total_weapon_damage(weapon_id: String, loaded_ammo_id: String = "") -> Vector2i:
+	var wp: Variant = item_def(weapon_id).get("params", {})
+	var body_min := 0
+	var body_max := 0
+	if typeof(wp) == TYPE_DICTIONARY:
+		body_min = int(wp.get("damage_min", 0))
+		body_max = int(wp.get("damage_max", 0))
+	var ammo_id := loaded_ammo_id
+	if ammo_id == "":
+		ammo_id = ammo_id_for_weapon(weapon_id)
+	var a := ammo_damage(ammo_id)
+	return Vector2i(body_min + a, body_max + a)
 
 
 static func rules() -> Dictionary:

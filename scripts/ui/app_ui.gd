@@ -16,6 +16,10 @@ signal inventory_open_pressed
 signal battle_inventory_pressed
 signal inventory_equip_requested(item_id: String, slot: String)
 signal inventory_unequip_requested(slot: String)
+signal inventory_withdraw_requested(item_id: String, qty: int)
+signal inventory_deposit_requested(item_id: String, qty: int)
+signal set_level_requested(level: int)
+signal spend_stat_requested(stat: String, delta: int)
 
 const TAB_LOBBY := 0
 const TAB_BATTLE := 1
@@ -78,6 +82,11 @@ const ACTION_DIM := Color(1, 1, 1, 0.45)
 @onready var find_btn: Button = $LobbyScreen/FindCenter/FindBtn
 
 var inventory_ui: ZZInventoryUI
+var _lobby_level_opt: OptionButton
+var _lobby_unspent: Label
+var _lobby_profile: Dictionary = {}
+var _lobby_stat_btns: Dictionary = {} # stat -> {minus, plus, value label}
+var _updating_lobby_profile: bool = false
 
 @onready var chat_tabs: TabContainer = $ChatDock/Margin/MainRow/ChatCol/Tabs
 @onready var lobby_chat_log: RichTextLabel = $ChatDock/Margin/MainRow/ChatCol/Tabs/Лобби
@@ -113,6 +122,7 @@ var inventory_ui: ZZInventoryUI
 
 var _bullet_tex: Texture2D
 var _mag_size: int = 6
+var _fire_mode_hint: String = "Одиночный"
 
 @onready var result_overlay: Control = $BattleHud/ResultOverlay
 @onready var result_label: Label = $BattleHud/ResultOverlay/Center/Panel/VBox/ResultLabel
@@ -123,6 +133,7 @@ func _ready() -> void:
 	continue_btn.pressed.connect(_on_continue)
 	nick_edit.text_submitted.connect(func(_t): _on_continue())
 	find_btn.pressed.connect(func(): find_match_pressed.emit())
+	_setup_lobby_profile_controls()
 	if inventory_btn != null:
 		inventory_btn.pressed.connect(_on_inventory_btn)
 	if battle_inv_btn != null:
@@ -135,7 +146,7 @@ func _ready() -> void:
 	cover_btn.pressed.connect(func(): posture_pressed.emit("cover"))
 	_bind_quick_bar()
 	_wire_tip_host(reload_btn)
-	reload_btn.pressed.connect(func(): weapon_slot_pressed.emit(0))
+	_wire_weapon_slot_btn(reload_btn, 0)
 	_ensure_weapon2_btn()
 	var top_row := char_dock.get_node_or_null("VBox/TopRow") as Control if char_dock != null else null
 	if top_row != null and not top_row.resized.is_connected(_sync_weapon_card_widths):
@@ -179,6 +190,12 @@ func _ensure_inventory_ui() -> void:
 	inventory_ui.unequip_requested.connect(func(slot: String):
 		inventory_unequip_requested.emit(slot)
 	)
+	inventory_ui.withdraw_requested.connect(func(item_id: String, qty: int):
+		inventory_withdraw_requested.emit(item_id, qty)
+	)
+	inventory_ui.deposit_requested.connect(func(item_id: String, qty: int):
+		inventory_deposit_requested.emit(item_id, qty)
+	)
 
 
 func _on_inventory_btn() -> void:
@@ -187,7 +204,7 @@ func _on_inventory_btn() -> void:
 	if inventory_ui.visible:
 		inventory_ui.close()
 		return
-	inventory_ui.open_for(player_nick)
+	inventory_ui.open_for(player_nick, true)
 	inventory_open_pressed.emit()
 
 
@@ -202,13 +219,14 @@ func open_battle_inventory(data: Dictionary) -> void:
 	if inventory_ui == null:
 		_ensure_inventory_ui()
 	inventory_ui.apply_state(data)
-	inventory_ui.open_for(player_nick)
+	inventory_ui.open_for(player_nick, false)
 
 
 func apply_inventory_state(data: Dictionary) -> void:
 	if inventory_ui == null:
 		_ensure_inventory_ui()
 	inventory_ui.apply_state(data)
+	_apply_lobby_profile(data)
 
 
 func hide_inventory() -> void:
@@ -381,36 +399,122 @@ func set_shoot_cost(ap_cost: int) -> void:
 
 
 func set_mag_size(mag_size: int) -> void:
-	_mag_size = maxi(1, mag_size)
+	_mag_size = maxi(0, mag_size)
 	_refresh_weapon_slot()
 
 
 func refresh_lobby_stats_from_rules() -> void:
+	## Prefer live profile from inventory_state; fall back to rules defaults.
+	if not _lobby_profile.is_empty():
+		_apply_lobby_profile(_lobby_profile)
+		return
 	if not ZZLos.has_rules():
 		_set_lobby_stats_placeholder()
 		return
-	var lvl := ZZLos.rule_i("default_level")
 	var s := ZZLos.default_stat()
-	var carry := ZZLos.compute_carry_weight(s)
-	var inv_w := ZZLos.compute_loadout_weight()
-	var ap := ZZLos.compute_effective_max_ap(s, s, s)
-	lobby_level.text = "Уровень: %d" % lvl
-	lobby_str.text = "Сила: %d" % s
-	lobby_agi.text = "Ловкость: %d" % s
-	lobby_end.text = "Выносливость: %d" % s
-	lobby_intu.text = "Интуиция: %d" % s
-	lobby_acc.text = "Меткость: %d" % s
-	lobby_int.text = "Интеллект: %d" % s
-	lobby_hp.text = "ХП: %d" % ZZLos.compute_max_hp(s)
+	_set_lobby_stat_texts(1, {
+		"strength": s, "agility": s, "endurance": s,
+		"intuition": s, "accuracy": s, "intelligence": s,
+	}, 0, 0.0, float(ZZLos.compute_carry_weight(s)))
+
+
+func _setup_lobby_profile_controls() -> void:
+	var box: VBoxContainer = lobby_level.get_parent() as VBoxContainer if lobby_level != null else null
+	if box == null:
+		return
+	## Level selector under "Уровень" label.
+	_lobby_level_opt = OptionButton.new()
+	_lobby_level_opt.focus_mode = Control.FOCUS_NONE
+	for lv in range(1, 7):
+		_lobby_level_opt.add_item("Уровень %d" % lv, lv)
+	_lobby_level_opt.select(0)
+	_lobby_level_opt.item_selected.connect(_on_lobby_level_selected)
+	box.add_child(_lobby_level_opt)
+	box.move_child(_lobby_level_opt, lobby_level.get_index() + 1)
+	lobby_level.visible = false
+	## Stats are auto-filled from level gear reqs — no ± / unspent UI.
+	_lobby_unspent = Label.new()
+	_lobby_unspent.add_theme_font_size_override("font_size", 11)
+	_lobby_unspent.text = "Статы под топ шмот уровня"
+	box.add_child(_lobby_unspent)
+	box.move_child(_lobby_unspent, _lobby_level_opt.get_index() + 1)
+	_wire_lobby_stat_row(lobby_str, "strength", "Сила")
+	_wire_lobby_stat_row(lobby_agi, "agility", "Ловкость")
+	_wire_lobby_stat_row(lobby_end, "endurance", "Выносливость")
+	_wire_lobby_stat_row(lobby_intu, "intuition", "Интуиция")
+	_wire_lobby_stat_row(lobby_acc, "accuracy", "Меткость")
+	_wire_lobby_stat_row(lobby_int, "intelligence", "Интеллект")
+
+
+func _wire_lobby_stat_row(lab: Label, stat: String, title: String) -> void:
+	if lab == null:
+		return
+	lab.text = "%s: 5" % title
+	_lobby_stat_btns[stat] = {"label": lab, "title": title}
+
+
+func _on_lobby_level_selected(idx: int) -> void:
+	if _updating_lobby_profile or _lobby_level_opt == null:
+		return
+	var lv := int(_lobby_level_opt.get_item_id(idx))
+	set_level_requested.emit(lv)
+
+
+func _apply_lobby_profile(data: Dictionary) -> void:
+	_lobby_profile = data.duplicate(true)
+	var tip_stats: Variant = data.get("stats", {})
+	if typeof(tip_stats) == TYPE_DICTIONARY:
+		ZZItemTooltip.set_player_context(int(data.get("level", 1)), tip_stats as Dictionary)
+	var lvl := maxi(1, int(data.get("level", 1)))
+	var stats_v: Variant = data.get("stats", {})
+	var stats: Dictionary = stats_v if typeof(stats_v) == TYPE_DICTIONARY else {}
+	var unspent := int(data.get("unspent_points", 0))
+	var inv_w := float(data.get("inventory_weight", 0.0))
+	var carry := float(data.get("carry_weight", 50.0))
+	_set_lobby_stat_texts(lvl, stats, unspent, inv_w, carry)
+
+
+func _set_lobby_stat_texts(lvl: int, stats: Dictionary, unspent: int, inv_w: float, carry: float) -> void:
+	_updating_lobby_profile = true
+	if _lobby_level_opt != null:
+		var sel := clampi(lvl - 1, 0, 5)
+		if _lobby_level_opt.selected != sel:
+			_lobby_level_opt.select(sel)
+	if _lobby_unspent != null:
+		_lobby_unspent.text = "Статы под топ шмот уровня"
+	var map := {
+		"strength": lobby_str, "agility": lobby_agi, "endurance": lobby_end,
+		"intuition": lobby_intu, "accuracy": lobby_acc, "intelligence": lobby_int,
+	}
+	var titles := {
+		"strength": "Сила", "agility": "Ловкость", "endurance": "Выносливость",
+		"intuition": "Интуиция", "accuracy": "Меткость", "intelligence": "Интеллект",
+	}
+	for key in map.keys():
+		var lab: Label = map[key]
+		if lab != null:
+			lab.text = "%s: %d" % [titles[key], int(stats.get(key, 5))]
+	var strv := int(stats.get("strength", 5))
+	var agiv := int(stats.get("agility", 5))
+	var endv := int(stats.get("endurance", 5))
+	var ap := ZZLos.compute_max_ap(strv, agiv, endv)
+	if inv_w > carry:
+		var frac := ZZLos.rule_f("overweight_ap_frac")
+		if frac <= 0.0:
+			frac = 0.2
+		ap = maxi(0, int(floor(float(ap) * frac)))
+	lobby_hp.text = "ХП: %d" % ZZLos.compute_max_hp(endv)
 	lobby_ap.text = "ОД: %d" % ap
-	if inv_w > float(carry):
-		lobby_carry.text = "Вес: %.1f/%d (перегруз)" % [inv_w, carry]
+	if inv_w > carry:
+		lobby_carry.text = "Вес: %.1f/%.0f (перегруз)" % [inv_w, carry]
 	else:
-		lobby_carry.text = "Вес: %.1f/%d" % [inv_w, carry]
+		lobby_carry.text = "Вес: %.1f/%.0f" % [inv_w, carry]
+	_updating_lobby_profile = false
 
 
 func _set_lobby_stats_placeholder() -> void:
-	lobby_level.text = "Уровень: —"
+	if _lobby_unspent != null:
+		_lobby_unspent.text = "Статы под топ шмот уровня"
 	lobby_str.text = "Сила: —"
 	lobby_agi.text = "Ловкость: —"
 	lobby_end.text = "Выносливость: —"
@@ -497,11 +601,21 @@ func set_switch_weapon_affordance(look_ok: bool) -> void:
 
 
 func set_weapons(weapons: Array, active_idx: int, switch_ap: int = 1) -> void:
-	_weapon_slots = weapons.duplicate()
+	## Deep-copy slot dicts so legacy ammo setters never mutate battle.local_weapons.
+	_weapon_slots = []
+	for item in weapons:
+		if typeof(item) != TYPE_DICTIONARY:
+			continue
+		var d: Dictionary = (item as Dictionary).duplicate()
+		if str(d.get("id", "")) == "":
+			continue
+		_weapon_slots.append(d)
 	_active_weapon_idx = clampi(active_idx, 0, maxi(0, _weapon_slots.size() - 1))
 	_switch_weapon_cost = maxi(0, switch_ap)
+	## Always two HUD slots (primary/secondary). Empty when unequipped — never hide #2.
 	if _weapon2_btn != null:
-		_weapon2_btn.visible = _weapon_slots.size() >= 2
+		_weapon2_btn.visible = true
+	call_deferred("_sync_weapon_card_widths")
 	_apply_weapon_slot_visuals()
 
 
@@ -771,6 +885,12 @@ func set_ammo(in_mag: int, reserve: int) -> void:
 	_refresh_weapon_slot()
 
 
+func set_fire_mode_hint(label: String) -> void:
+	_fire_mode_hint = label if label != "" else "Одиночный"
+	_refresh_weapon_slot()
+	_apply_weapon_slot_visuals()
+
+
 func set_undo_enabled(enabled: bool) -> void:
 	undo_btn.disabled = not enabled
 
@@ -795,8 +915,6 @@ func _apply_hud_icons() -> void:
 	run_btn.expand_icon = true
 	cover_btn.expand_icon = true
 	undo_btn.expand_icon = true
-	if rifle_icon != null:
-		rifle_icon.texture = ZZHudIcons.rifle(160, 48)
 	if reload_icon != null:
 		reload_icon.texture = ZZHudIcons.icon_reload(14)
 	_apply_weapon_slot_visuals()
@@ -813,14 +931,42 @@ func _ensure_weapon2_btn() -> void:
 	_wire_tip_host(_weapon2_btn)
 	reload_btn.get_parent().add_child(_weapon2_btn)
 	reload_btn.get_parent().move_child(_weapon2_btn, reload_btn.get_index() + 1)
-	_weapon2_btn.pressed.connect(func(): weapon_slot_pressed.emit(1))
+	_wire_weapon_slot_btn(_weapon2_btn, 1)
 	var icon2: TextureRect = _weapon2_btn.get_node_or_null("RifleIcon")
 	if icon2 != null:
-		icon2.texture = ZZHudIcons.pistol(120, 40)
+		icon2.texture = null
 	var reload_icon2: TextureRect = _weapon2_btn.get_node_or_null("ReloadRow/ReloadIcon")
 	if reload_icon2 != null:
 		reload_icon2.texture = ZZHudIcons.icon_reload(14)
 	call_deferred("_sync_weapon_card_widths")
+
+
+func _wire_weapon_slot_btn(btn: Button, slot: int) -> void:
+	if btn == null:
+		return
+	if not btn.pressed.is_connected(_on_weapon_slot_pressed.bind(slot)):
+		btn.pressed.connect(_on_weapon_slot_pressed.bind(slot))
+	if not btn.gui_input.is_connected(_on_weapon_slot_gui_input.bind(slot)):
+		btn.gui_input.connect(_on_weapon_slot_gui_input.bind(slot))
+
+
+func _on_weapon_slot_pressed(slot: int) -> void:
+	weapon_slot_pressed.emit(slot)
+
+
+func _on_weapon_slot_gui_input(event: InputEvent, slot: int) -> void:
+	## ПКМ по активному стволу — перезарядка (ЛКМ: смена / режим огня).
+	if not (event is InputEventMouseButton and event.pressed):
+		return
+	var mb := event as InputEventMouseButton
+	if mb.button_index != MOUSE_BUTTON_RIGHT:
+		return
+	if slot != _active_weapon_idx:
+		return
+	if not _reload_can_use:
+		return
+	reload_pressed.emit()
+	get_viewport().set_input_as_handled()
 
 
 func _apply_weapon_slot_visuals() -> void:
@@ -861,59 +1007,110 @@ func _sync_weapon_card_widths() -> void:
 	_apply_weapon_slot_visuals()
 
 
+func _weapon_at(slot: int) -> Dictionary:
+	if slot < 0 or slot >= _weapon_slots.size():
+		return {}
+	if typeof(_weapon_slots[slot]) != TYPE_DICTIONARY:
+		return {}
+	var w: Dictionary = _weapon_slots[slot]
+	if str(w.get("id", "")) == "":
+		return {}
+	return w
+
+
 func _fill_weapon_btn(btn: Button, slot: int) -> void:
 	if btn == null:
 		return
 	btn.clip_contents = true
-	var w: Dictionary = {}
-	if slot < _weapon_slots.size() and typeof(_weapon_slots[slot]) == TYPE_DICTIONARY:
-		w = _weapon_slots[slot]
-	var shoot_ap := int(w.get("shoot_ap", _shoot_cost if slot == _active_weapon_idx else 2))
-	var reload_ap := int(w.get("reload_ap", _reload_cost if slot == _active_weapon_idx else 3))
-	var in_mag := int(w.get("ammo_in_mag", _ammo_in_mag if slot == _active_weapon_idx else 0))
-	var reserve := int(w.get("ammo_reserve", _ammo_reserve if slot == _active_weapon_idx else 0))
-	var mag_size := int(w.get("mag_size", 6 if slot == 0 else 10))
-	var total := in_mag + reserve
-	var wid := str(w.get("id", "kar98" if slot == 0 else "glock17"))
+	var w := _weapon_at(slot)
 	var shot_lbl: Label = btn.get_node_or_null("ShotCostLabel")
 	var reload_lbl: Label = btn.get_node_or_null("ReloadRow/ReloadCostLabel")
 	var reload_ic: TextureRect = btn.get_node_or_null("ReloadRow/ReloadIcon")
 	var ammo_row: HBoxContainer = btn.get_node_or_null("AmmoRow")
 	var ammo_lbl: Label = btn.get_node_or_null("AmmoRow/AmmoCountLabel")
 	var icon: TextureRect = btn.get_node_or_null("RifleIcon")
+	var reload_row: HBoxContainer = btn.get_node_or_null("ReloadRow")
+	var tip := _wire_tip_host(btn)
+	## Empty primary/secondary: clear icon/AP/ammo — never fake kar98/glock.
+	if w.is_empty():
+		if shot_lbl != null:
+			shot_lbl.text = ""
+		if reload_row != null:
+			reload_row.visible = false
+		if reload_lbl != null:
+			reload_lbl.visible = false
+		if reload_ic != null:
+			reload_ic.visible = false
+		if ammo_row != null:
+			ammo_row.visible = false
+		if ammo_lbl != null:
+			ammo_lbl.visible = false
+		if icon != null:
+			icon.texture = null
+		if tip != null:
+			tip.tip_item_id = ""
+			tip.tip_qty = 0
+			tip.tip_extra = []
+		btn.tooltip_text = ""
+		var empty_col: HBoxContainer = btn.get_node_or_null("AmmoRow/AmmoCol")
+		if empty_col != null:
+			for c in empty_col.get_children():
+				c.queue_free()
+		return
+	var melee := bool(w.get("melee", false)) or ZZLos.is_melee_weapon(str(w.get("id", "")))
+	var shoot_ap := int(w.get("shoot_ap", _shoot_cost if slot == _active_weapon_idx else 2))
+	var reload_ap := int(w.get("reload_ap", 0))
+	var in_mag := int(w.get("ammo_in_mag", _ammo_in_mag if slot == _active_weapon_idx else 0))
+	var reserve := int(w.get("ammo_reserve", _ammo_reserve if slot == _active_weapon_idx else 0))
+	var mag_size := int(w.get("mag_size", 0))
+	var show_reload := not melee and reload_ap > 0
+	var show_mag := not melee and mag_size > 0
+	var total := in_mag + reserve
+	var wid := str(w.get("id", ""))
 	## Bottom «ОД:» text pad; reload icon has transparent bleed — pull row left to match.
 	const CARD_PAD_X := 6.0
 	const RELOAD_PAD_X := 2.0
 	if shot_lbl != null:
-		shot_lbl.text = "ОД: %d" % shoot_ap
+		if slot == _active_weapon_idx and _fire_mode_hint == "Очередь":
+			shot_lbl.text = "Оч: %d" % int(w.get("burst_ap", shoot_ap))
+		elif slot == _active_weapon_idx and _fire_mode_hint == "Дуплет":
+			shot_lbl.text = "Ду: %d" % int(w.get("duplet_ap", shoot_ap))
+		else:
+			shot_lbl.text = "ОД: %d" % shoot_ap
 		shot_lbl.add_theme_font_size_override("font_size", 9)
 		shot_lbl.offset_left = CARD_PAD_X
-	if reload_lbl != null:
-		reload_lbl.text = "%d ОД" % reload_ap
-		reload_lbl.add_theme_font_size_override("font_size", 9)
-		reload_lbl.visible = true
-	if reload_ic != null:
-		reload_ic.texture = ZZHudIcons.icon_reload(14)
-		reload_ic.visible = true
-	var reload_row: HBoxContainer = btn.get_node_or_null("ReloadRow")
 	if reload_row != null:
-		reload_row.visible = true
-		reload_row.offset_left = RELOAD_PAD_X
-		reload_row.offset_top = 2.0
-		reload_row.offset_right = RELOAD_PAD_X + 70.0
-		reload_row.offset_bottom = 16.0
-		reload_row.add_theme_constant_override("separation", 1)
+		reload_row.visible = show_reload
+		if show_reload:
+			reload_row.offset_left = RELOAD_PAD_X
+			reload_row.offset_top = 2.0
+			reload_row.offset_right = RELOAD_PAD_X + 70.0
+			reload_row.offset_bottom = 16.0
+			reload_row.add_theme_constant_override("separation", 1)
+	if reload_lbl != null:
+		reload_lbl.visible = show_reload
+		if show_reload:
+			reload_lbl.text = "%d ОД" % reload_ap
+			reload_lbl.add_theme_font_size_override("font_size", 9)
+	if reload_ic != null:
+		reload_ic.visible = show_reload
+		if show_reload:
+			reload_ic.texture = ZZHudIcons.icon_reload(14)
 	if ammo_row != null:
-		var card_w := maxf(btn.custom_minimum_size.x, btn.size.x)
-		var half := maxf(52.0, card_w * 0.46)
-		ammo_row.offset_left = -half
-		ammo_row.offset_right = half
-		ammo_row.offset_top = 14.0
-		ammo_row.offset_bottom = 26.0
-		ammo_row.add_theme_constant_override("separation", 2)
+		ammo_row.visible = show_mag
+		if show_mag:
+			var card_w := maxf(btn.custom_minimum_size.x, btn.size.x)
+			var half := maxf(52.0, card_w * 0.46)
+			ammo_row.offset_left = -half
+			ammo_row.offset_right = half
+			ammo_row.offset_top = 14.0
+			ammo_row.offset_bottom = 26.0
+			ammo_row.add_theme_constant_override("separation", 2)
 	if ammo_lbl != null:
-		ammo_lbl.text = "%d/%d" % [in_mag, total]
-		ammo_lbl.add_theme_font_size_override("font_size", 9)
+		ammo_lbl.visible = show_mag
+		if show_mag:
+			ammo_lbl.text = "%d/%d" % [in_mag, total]
+			ammo_lbl.add_theme_font_size_override("font_size", 9)
 	if icon != null:
 		var mock := ZZInventoryIcons.tex_tight(wid)
 		if mock != null:
@@ -924,16 +1121,42 @@ func _fill_weapon_btn(btn: Button, slot: int) -> void:
 			icon.texture = ZZHudIcons.rifle(160, 48)
 		var card_w2 := maxf(btn.custom_minimum_size.x, btn.size.x)
 		_fit_weapon_icon(icon, card_w2)
-	var tip := _wire_tip_host(btn)
 	if tip != null:
 		tip.tip_item_id = wid
 		tip.tip_qty = 1
-		tip.tip_extra = [
-			["Патроны", "%d/%d" % [in_mag, total]],
+		var loaded := str(w.get("loaded_ammo_id", ""))
+		var dmg := ZZLos.total_weapon_damage(wid, loaded)
+		if w.has("damage_min"):
+			dmg = Vector2i(int(w.get("damage_min", dmg.x)), int(w.get("damage_max", dmg.y)))
+		var extra: Array = [
+			["Урон", "%s–%s" % [ZZItemTooltip.fmt_val(dmg.x), ZZItemTooltip.fmt_val(dmg.y)]],
 		]
+		if melee:
+			extra.append(["Тип", "Ближний бой"])
+		else:
+			extra.append(["Патроны", "%d/%d" % [in_mag, total]])
+			if loaded != "":
+				extra.append(["Заряжено", str(ZZLos.item_def(loaded).get("name", loaded))])
+			if show_reload:
+				extra.append(["Перезарядка", "%s ОД · ПКМ" % ZZItemTooltip.fmt_val(reload_ap)])
+		if int(w.get("burst_ap", 0)) > 0:
+			extra.append(["Очередь", "%s ОД" % ZZItemTooltip.fmt_val(w.get("burst_ap"))])
+		if int(w.get("duplet_ap", 0)) > 0:
+			extra.append(["Дуплет", "%s ОД" % ZZItemTooltip.fmt_val(w.get("duplet_ap"))])
+		if slot == _active_weapon_idx:
+			if not melee and (int(w.get("burst_ap", 0)) > 0 or int(w.get("duplet_ap", 0)) > 0):
+				extra.append(["Режим", _fire_mode_hint])
+				extra.append(["Смена режима", "клик по слоту"])
+			elif not melee:
+				extra.append(["Перезарядка", "клик / ПКМ"])
+		tip.tip_extra = extra
 	btn.tooltip_text = " "  # non-empty → custom tip
 	var col: HBoxContainer = btn.get_node_or_null("AmmoRow/AmmoCol")
-	_refresh_ammo_bullets_on(col, in_mag, mag_size)
+	if show_mag:
+		_refresh_ammo_bullets_on(col, in_mag, mag_size)
+	elif col != null:
+		for c in col.get_children():
+			c.queue_free()
 
 
 func _fit_weapon_icon(icon: TextureRect, card_w: float) -> void:
@@ -948,49 +1171,45 @@ func _fit_weapon_icon(icon: TextureRect, card_w: float) -> void:
 
 
 func _refresh_weapon_slot_modulate() -> void:
-	# Active: bright (or dim if no AP for reload). Inactive: always shaded.
+	# Active: bright (or dim if needs reload and no AP). Inactive / empty: shaded.
 	var active_hi := Color(1.0, 0.95, 0.82, 1.0) if _active_weapon_look_ok else ACTION_DIM
 	var idle_col := ACTION_DIM if _switch_look_ok else Color(1, 1, 1, 0.28)
+	var empty_col := Color(1, 1, 1, 0.28)
 	if reload_btn != null:
 		reload_btn.disabled = false
-		reload_btn.modulate = active_hi if _active_weapon_idx == 0 else idle_col
+		if _weapon_at(0).is_empty():
+			reload_btn.modulate = empty_col
+		else:
+			reload_btn.modulate = active_hi if _active_weapon_idx == 0 else idle_col
 	if _weapon2_btn != null:
 		_weapon2_btn.disabled = false
-		_weapon2_btn.modulate = active_hi if _active_weapon_idx == 1 else idle_col
+		if _weapon_at(1).is_empty():
+			_weapon2_btn.modulate = empty_col
+		else:
+			_weapon2_btn.modulate = active_hi if _active_weapon_idx == 1 else idle_col
 
 
 func _refresh_weapon_slot() -> void:
 	if _weapon_slots.is_empty():
-		if shot_cost_label != null:
-			shot_cost_label.text = "ОД: %d" % _shoot_cost
-		if reload_cost_label != null:
-			reload_cost_label.text = "%d ОД" % _reload_cost
-		if ammo_count_label != null:
-			var total := _ammo_in_mag + _ammo_reserve
-			ammo_count_label.text = "%d/%d" % [_ammo_in_mag, total]
-		if reload_btn != null:
-			var tip := _wire_tip_host(reload_btn)
-			if tip != null:
-				tip.tip_item_id = "kar98"
-				tip.tip_qty = 1
-				tip.tip_extra = [
-					["Патроны", "%d/%d" % [_ammo_in_mag, _ammo_in_mag + _ammo_reserve]],
-				]
-			reload_btn.tooltip_text = " "
-		_refresh_ammo_bullets_on(ammo_col, _ammo_in_mag, _mag_size)
+		_apply_weapon_slot_visuals()
 	else:
-		# Keep active slot ammo mirrored for legacy setters.
+		# Mirror ammo only — never overwrite reload_ap / mag_size / shoot_ap from globals
+		# (that leaked knife reload_ap=0 onto the revolver while UI active_idx was stale).
 		if _active_weapon_idx < _weapon_slots.size() and typeof(_weapon_slots[_active_weapon_idx]) == TYPE_DICTIONARY:
-			_weapon_slots[_active_weapon_idx]["ammo_in_mag"] = _ammo_in_mag
-			_weapon_slots[_active_weapon_idx]["ammo_reserve"] = _ammo_reserve
-			_weapon_slots[_active_weapon_idx]["shoot_ap"] = _shoot_cost
-			_weapon_slots[_active_weapon_idx]["reload_ap"] = _reload_cost
-			_weapon_slots[_active_weapon_idx]["mag_size"] = _mag_size
+			var aw: Dictionary = _weapon_slots[_active_weapon_idx]
+			var melee := bool(aw.get("melee", false)) or ZZLos.is_melee_weapon(str(aw.get("id", "")))
+			if not melee:
+				aw["ammo_in_mag"] = _ammo_in_mag
+				aw["ammo_reserve"] = _ammo_reserve
 		_apply_weapon_slot_visuals()
 
 
 func _refresh_ammo_bullets_on(col: HBoxContainer, in_mag: int, mag_size: int) -> void:
 	if col == null:
+		return
+	if mag_size <= 0:
+		for c in col.get_children():
+			c.queue_free()
 		return
 	if _bullet_tex == null:
 		_bullet_tex = ZZHudIcons.bullet(8)

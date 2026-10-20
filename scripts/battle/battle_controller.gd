@@ -10,7 +10,6 @@ var posture_cost: int = 0
 var medkit_cost: int = 0
 var medkit_heal_min: int = 0
 var medkit_heal_max: int = 0
-var medkit_max: int = 0
 var reload_cost: int = 0
 var switch_weapon_cost: int = 1
 var inventory_ap_cost: int = 2
@@ -64,7 +63,12 @@ var local_weapons: Array = []
 var local_active_weapon_idx: int = 0
 var _turn_start_weapons: Array = []
 var _turn_start_active_weapon_idx: int = 0
+var _turn_start_quick: Array = ["", "", "", ""]
+var _turn_start_equipped: Dictionary = {"primary": "", "secondary": "", "armor": ""}
 var local_mag_size: int = 6
+## Fire mode for next attack: "single" | "burst" | "duplet".
+var fire_mode: String = "single"
+signal fire_mode_changed(mode: String)
 var local_pos: Vector2i = Vector2i.ZERO
 var local_posture: String = "stand"
 var action_queue: Array = []
@@ -159,15 +163,57 @@ func request_inventory_get() -> void:
 
 
 func request_inventory_equip(item_id: String, slot: String) -> void:
-	if not ws.is_open() or in_battle or item_id == "" or slot == "":
+	if item_id == "" or slot == "":
+		return
+	if in_battle:
+		if input_locked or _playing_events:
+			return
+		action_queue.append(ZZProtocol.equip_action(item_id, slot))
+		_apply_local_equip(item_id, slot)
+		_emit_history()
+		return
+	if not ws.is_open():
 		return
 	ws.send_dict(ZZProtocol.inventory_equip(item_id, slot))
 
 
 func request_inventory_unequip(slot: String) -> void:
-	if not ws.is_open() or in_battle or slot == "":
+	if slot == "":
+		return
+	if in_battle:
+		if input_locked or _playing_events:
+			return
+		action_queue.append(ZZProtocol.unequip_action(slot))
+		_apply_local_unequip(slot)
+		_emit_history()
+		return
+	if not ws.is_open():
 		return
 	ws.send_dict(ZZProtocol.inventory_unequip(slot))
+
+
+func request_inventory_withdraw(item_id: String, qty: int = 1) -> void:
+	if in_battle or item_id == "" or not ws.is_open():
+		return
+	ws.send_dict(ZZProtocol.inventory_withdraw(item_id, qty))
+
+
+func request_inventory_deposit(item_id: String, qty: int = 1) -> void:
+	if in_battle or item_id == "" or not ws.is_open():
+		return
+	ws.send_dict(ZZProtocol.inventory_deposit(item_id, qty))
+
+
+func request_set_level(level: int) -> void:
+	if in_battle or not ws.is_open():
+		return
+	ws.send_dict(ZZProtocol.set_level(level))
+
+
+func request_spend_stat(stat: String, delta: int) -> void:
+	if in_battle or stat == "" or not ws.is_open():
+		return
+	ws.send_dict(ZZProtocol.spend_stat(stat, delta))
 
 
 ## Spend inventory_ap_cost and open inventory overlay from local battle snapshot.
@@ -188,20 +234,257 @@ func _local_inventory_snapshot() -> Dictionary:
 	var inv: Variant = pd.get("inventory", local_inventory)
 	if typeof(inv) != TYPE_ARRAY:
 		inv = local_inventory
-	var eq: Variant = pd.get("equipped", {})
-	if typeof(eq) != TYPE_DICTIONARY:
-		eq = {}
-	var q: Variant = pd.get("quick", local_quick)
-	if typeof(q) != TYPE_ARRAY:
-		q = local_quick
 	return {
 		"inventory": inv,
-		"equipped": eq,
-		"quick": q,
+		"equipped": _local_equipped(),
+		"quick": local_quick.duplicate(),
 		"inventory_weight": float(pd.get("inventory_weight", 0.0)),
 		"carry_weight": float(pd.get("carry_weight", 50.0)),
 		"overweight": bool(pd.get("overweight", false)),
+		"level": maxi(1, int(pd.get("level", 1))),
 	}
+
+
+func _local_equipped() -> Dictionary:
+	if your_id != "" and players.has(your_id):
+		var eq: Variant = players[your_id].get("equipped", {})
+		if typeof(eq) == TYPE_DICTIONARY:
+			return {
+				"primary": str(eq.get("primary", "")),
+				"secondary": str(eq.get("secondary", "")),
+				"armor": str(eq.get("armor", "")),
+			}
+	return {"primary": "", "secondary": "", "armor": ""}
+
+
+func _store_local_equipped(eq: Dictionary) -> void:
+	if your_id == "" or not players.has(your_id):
+		return
+	players[your_id]["equipped"] = {
+		"primary": str(eq.get("primary", "")),
+		"secondary": str(eq.get("secondary", "")),
+		"armor": str(eq.get("armor", "")),
+	}
+	players[your_id]["quick"] = local_quick.duplicate()
+
+
+func _apply_local_equip(item_id: String, slot: String) -> void:
+	var eq := _local_equipped()
+	var item_type := str(ZZLos.item_def(item_id).get("type", ""))
+	if slot == "primary" or slot == "secondary":
+		if item_type != "weapon":
+			return
+		if slot == "primary":
+			if str(eq.get("secondary", "")) == item_id:
+				eq["secondary"] = str(eq.get("primary", ""))
+			_clear_quick_refs(item_id)
+			eq["primary"] = item_id
+		else:
+			if str(eq.get("primary", "")) == item_id:
+				eq["primary"] = str(eq.get("secondary", ""))
+			_clear_quick_refs(item_id)
+			eq["secondary"] = item_id
+		_store_local_equipped(eq)
+		_rebuild_weapons_from_equipped()
+	elif slot == "armor":
+		if item_type != "armor":
+			return
+		_clear_quick_refs(item_id)
+		eq["armor"] = item_id
+		_store_local_equipped(eq)
+	elif slot.begins_with("quick_"):
+		if item_type != "medkit" and item_type != "ammo":
+			return
+		var qi := int(slot.trim_prefix("quick_"))
+		while local_quick.size() < 4:
+			local_quick.append("")
+		for i in range(local_quick.size()):
+			if str(local_quick[i]) == item_id:
+				local_quick[i] = ""
+		if qi >= 0 and qi < local_quick.size():
+			local_quick[qi] = item_id
+		_store_local_equipped(eq)
+		quick_changed.emit()
+	else:
+		return
+
+
+func _apply_local_unequip(slot: String) -> void:
+	var eq := _local_equipped()
+	if slot == "primary" or slot == "secondary" or slot == "armor":
+		eq[slot] = ""
+		_store_local_equipped(eq)
+		if slot != "armor":
+			_rebuild_weapons_from_equipped()
+	elif slot.begins_with("quick_"):
+		var qi := int(slot.trim_prefix("quick_"))
+		while local_quick.size() < 4:
+			local_quick.append("")
+		if qi >= 0 and qi < local_quick.size():
+			local_quick[qi] = ""
+		_store_local_equipped(eq)
+		quick_changed.emit()
+
+
+func _clear_quick_refs(item_id: String) -> void:
+	for i in range(local_quick.size()):
+		if str(local_quick[i]) == item_id:
+			local_quick[i] = ""
+	quick_changed.emit()
+
+
+func _rebuild_weapons_from_equipped() -> void:
+	var eq := _local_equipped()
+	var prev_by_id: Dictionary = {}
+	_sync_active_weapon_ammo_local()
+	for w in local_weapons:
+		if typeof(w) == TYPE_DICTIONARY:
+			var wid := str(w.get("id", ""))
+			if wid != "":
+				prev_by_id[wid] = (w as Dictionary).duplicate()
+	var active_id := ""
+	if local_active_weapon_idx >= 0 and local_active_weapon_idx < local_weapons.size():
+		if typeof(local_weapons[local_active_weapon_idx]) == TYPE_DICTIONARY:
+			active_id = str(local_weapons[local_active_weapon_idx].get("id", ""))
+	local_weapons.clear()
+	var seen: Dictionary = {}
+	for slot_key in ["primary", "secondary"]:
+		var wid2 := str(eq.get(slot_key, ""))
+		if wid2 == "" or seen.has(wid2):
+			continue
+		seen[wid2] = true
+		if prev_by_id.has(wid2):
+			local_weapons.append((prev_by_id[wid2] as Dictionary).duplicate())
+		else:
+			local_weapons.append(_weapon_dict_from_catalog(wid2))
+	local_active_weapon_idx = 0
+	if active_id != "":
+		for i in range(local_weapons.size()):
+			if str(local_weapons[i].get("id", "")) == active_id:
+				local_active_weapon_idx = i
+				break
+	if local_weapons.is_empty():
+		local_ammo_in_mag = 0
+		local_ammo_reserve = 0
+		weapons_changed.emit(local_weapons, local_active_weapon_idx)
+		ammo_changed.emit(local_ammo_in_mag, local_ammo_reserve)
+		return
+	var aw: Dictionary = local_weapons[local_active_weapon_idx]
+	_apply_active_weapon_stats(aw)
+	_set_ammo_from_weapon(aw)
+	weapons_changed.emit(local_weapons, local_active_weapon_idx)
+	ammo_changed.emit(local_ammo_in_mag, local_ammo_reserve)
+
+
+func _weapon_dict_from_catalog(item_id: String, loaded_ammo_id: String = "") -> Dictionary:
+	var def := ZZLos.item_def(item_id)
+	var params: Variant = def.get("params", {})
+	var p: Dictionary = params if typeof(params) == TYPE_DICTIONARY else {}
+	var melee := bool(p.get("melee", false))
+	var body_min := int(p.get("damage_min", 0))
+	var body_max := int(p.get("damage_max", 0))
+	if melee:
+		return {
+			"id": item_id,
+			"melee": true,
+			"range": int(p.get("range", 1)),
+			"shoot_ap": int(p.get("shoot_ap", 0)),
+			"damage_min": body_min,
+			"damage_max": body_max,
+			"weapon_damage_min": body_min,
+			"weapon_damage_max": body_max,
+			"ammo_damage": 0,
+			"accuracy": float(p.get("accuracy", 0.0)),
+			"mag_size": 0,
+			"ammo_in_mag": 1,
+			"ammo_reserve": 0,
+			"reload_ap": 0,
+			"caliber": "",
+			"loaded_ammo_id": "",
+		}
+	var mag := maxi(1, int(p.get("mag_size", 6)))
+	var ammo_id := loaded_ammo_id if loaded_ammo_id != "" else _ammo_id_for_weapon(item_id)
+	var total := stack_qty(ammo_id) if ammo_id != "" else 0
+	var in_mag := mini(mag, total) if total > 0 else 0
+	var a_dmg := ZZLos.ammo_damage(ammo_id)
+	var burst_ap := int(p.get("burst_ap", 0))
+	var burst_size := int(p.get("burst_size", 0))
+	if burst_ap > 0 and burst_size <= 0:
+		burst_size = 3
+	return {
+		"id": item_id,
+		"melee": false,
+		"range": int(p.get("range", 0)),
+		"shoot_ap": int(p.get("shoot_ap", 0)),
+		"burst_ap": burst_ap,
+		"burst_size": burst_size,
+		"duplet_ap": int(p.get("duplet_ap", 0)),
+		"damage_min": body_min + a_dmg,
+		"damage_max": body_max + a_dmg,
+		"weapon_damage_min": body_min,
+		"weapon_damage_max": body_max,
+		"ammo_damage": a_dmg,
+		"accuracy": float(p.get("accuracy", 0.0)),
+		"mag_size": mag,
+		"ammo_in_mag": in_mag,
+		"ammo_reserve": maxi(0, total - in_mag),
+		"reload_ap": int(p.get("reload_ap", 0)),
+		"caliber": str(p.get("caliber", "")),
+		"loaded_ammo_id": ammo_id,
+	}
+
+
+func _ammo_id_for_weapon(weapon_id: String) -> String:
+	return ZZLos.ammo_id_for_weapon(weapon_id)
+
+
+func request_select_ammo(ammo_id: String) -> void:
+	if input_locked or not in_battle or _playing_events or ammo_id == "":
+		return
+	if local_active_weapon_idx < 0 or local_active_weapon_idx >= local_weapons.size():
+		return
+	var w: Dictionary = local_weapons[local_active_weapon_idx]
+	var wid := str(w.get("id", ""))
+	if not ZZLos.ammo_fits_weapon(ammo_id, wid):
+		return
+	if str(w.get("loaded_ammo_id", "")) == ammo_id:
+		return
+	action_queue.append(ZZProtocol.select_ammo_action(ammo_id))
+	_apply_local_select_ammo(ammo_id)
+	_emit_history()
+
+
+func _apply_local_select_ammo(ammo_id: String) -> void:
+	if local_active_weapon_idx < 0 or local_active_weapon_idx >= local_weapons.size():
+		return
+	var w: Dictionary = local_weapons[local_active_weapon_idx]
+	var wid := str(w.get("id", ""))
+	if not ZZLos.ammo_fits_weapon(ammo_id, wid):
+		return
+	## Empty mag into reserve of old type (reserve already tracked as stack remainder).
+	w["ammo_in_mag"] = 0
+	w["loaded_ammo_id"] = ammo_id
+	var total := stack_qty(ammo_id)
+	w["ammo_reserve"] = total
+	var body_min := int(w.get("weapon_damage_min", 0))
+	var body_max := int(w.get("weapon_damage_max", 0))
+	if body_min == 0 and body_max == 0:
+		var wp: Variant = ZZLos.item_def(wid).get("params", {})
+		if typeof(wp) == TYPE_DICTIONARY:
+			body_min = int(wp.get("damage_min", 0))
+			body_max = int(wp.get("damage_max", 0))
+			w["weapon_damage_min"] = body_min
+			w["weapon_damage_max"] = body_max
+	var a_dmg := ZZLos.ammo_damage(ammo_id)
+	w["ammo_damage"] = a_dmg
+	w["damage_min"] = body_min + a_dmg
+	w["damage_max"] = body_max + a_dmg
+	local_weapons[local_active_weapon_idx] = w
+	local_ammo_in_mag = 0
+	local_ammo_reserve = total
+	_apply_active_weapon_stats(w)
+	weapons_changed.emit(local_weapons, local_active_weapon_idx)
+	ammo_changed.emit(local_ammo_in_mag, local_ammo_reserve)
 
 
 func send_chat(text: String, channel: String = "lobby") -> void:
@@ -264,6 +547,8 @@ func request_medkit() -> void:
 func request_reload() -> void:
 	if input_locked or not in_battle or _playing_events:
 		return
+	if _active_weapon_melee() or local_mag_size <= 0 or reload_cost <= 0:
+		return
 	if local_ap < reload_cost:
 		return
 	# Client-only: no point queuing reload when mag is already full (or no reserve).
@@ -287,9 +572,56 @@ func request_weapon_slot(slot_index: int) -> void:
 	if slot_index < 0 or slot_index >= local_weapons.size():
 		return
 	if slot_index == local_active_weapon_idx:
-		request_reload()
+		## Несколько режимов — цикл; иначе ЛКМ = перезарядка (ПКМ тоже).
+		if _available_fire_modes().size() > 1:
+			cycle_fire_mode()
+		else:
+			request_reload()
 		return
 	request_switch_weapon(slot_index)
+
+
+func cycle_fire_mode() -> void:
+	var modes := _available_fire_modes()
+	if modes.is_empty():
+		return
+	var idx := modes.find(fire_mode)
+	if idx < 0:
+		idx = 0
+	else:
+		idx = (idx + 1) % modes.size()
+	fire_mode = str(modes[idx])
+	fire_mode_changed.emit(fire_mode)
+	_emit_history()
+
+
+func _available_fire_modes() -> Array:
+	var modes: Array = ["single"]
+	var w := _active_weapon_dict()
+	if int(w.get("burst_ap", 0)) > 0:
+		modes.append("burst")
+	if int(w.get("duplet_ap", 0)) > 0:
+		modes.append("duplet")
+	return modes
+
+
+func _active_weapon_dict() -> Dictionary:
+	if local_active_weapon_idx < 0 or local_active_weapon_idx >= local_weapons.size():
+		return {}
+	var w: Variant = local_weapons[local_active_weapon_idx]
+	return w if typeof(w) == TYPE_DICTIONARY else {}
+
+
+func _active_weapon_melee() -> bool:
+	var w := _active_weapon_dict()
+	return bool(w.get("melee", false)) or ZZLos.is_melee_weapon(str(w.get("id", "")))
+
+
+func _clamp_fire_mode() -> void:
+	var modes := _available_fire_modes()
+	if modes.find(fire_mode) < 0:
+		fire_mode = "single"
+		fire_mode_changed.emit(fire_mode)
 
 
 func request_switch_weapon(slot_index: int) -> void:
@@ -311,15 +643,27 @@ func request_switch_weapon(slot_index: int) -> void:
 func _apply_local_switch(slot_index: int) -> void:
 	_sync_active_weapon_ammo_local()
 	local_active_weapon_idx = slot_index
+	fire_mode = "single"
+	fire_mode_changed.emit(fire_mode)
 	var w: Dictionary = local_weapons[slot_index]
-	ZZLos.apply_weapon(w)
-	shoot_cost = int(w.get("shoot_ap", shoot_cost))
-	reload_cost = int(w.get("reload_ap", reload_cost))
-	local_mag_size = maxi(1, int(w.get("mag_size", local_mag_size)))
+	_apply_active_weapon_stats(w)
 	local_ammo_in_mag = int(w.get("ammo_in_mag", 0))
 	local_ammo_reserve = int(w.get("ammo_reserve", 0))
-	ammo_changed.emit(local_ammo_in_mag, local_ammo_reserve)
+	## weapons first so UI active_idx is correct before set_ammo/set_reload_cost.
 	weapons_changed.emit(local_weapons, local_active_weapon_idx)
+	ammo_changed.emit(local_ammo_in_mag, local_ammo_reserve)
+
+
+func _apply_active_weapon_stats(w: Dictionary) -> void:
+	ZZLos.apply_weapon(w)
+	shoot_cost = int(w.get("shoot_ap", shoot_cost))
+	var melee := bool(w.get("melee", false)) or ZZLos.is_melee_weapon(str(w.get("id", "")))
+	if melee:
+		reload_cost = 0
+		local_mag_size = 0
+	else:
+		reload_cost = int(w.get("reload_ap", reload_cost))
+		local_mag_size = maxi(1, int(w.get("mag_size", local_mag_size)))
 
 
 func _sync_active_weapon_ammo_local() -> void:
@@ -504,7 +848,6 @@ func _apply_combat_rules(rules: Variant) -> void:
 	medkit_heal_max = ZZLos.rule_i("medkit_heal_max")
 	if medkit_heal_max < medkit_heal_min:
 		medkit_heal_max = medkit_heal_min
-	medkit_max = ZZLos.rule_i("medkit_max")
 	reload_cost = ZZLos.rule_i("weapon_reload_ap")
 	switch_weapon_cost = ZZLos.rule_i("switch_weapon_ap")
 	if switch_weapon_cost <= 0:
@@ -531,6 +874,16 @@ func _apply_quick_from_payload(data: Dictionary) -> void:
 	var inv: Variant = data.get("inventory", [])
 	if typeof(inv) == TYPE_ARRAY and not inv.is_empty():
 		local_inventory = inv
+	var eq: Variant = data.get("equipped", {})
+	if typeof(eq) == TYPE_DICTIONARY and your_id != "" and players.has(your_id):
+		players[your_id]["equipped"] = {
+			"primary": str(eq.get("primary", "")),
+			"secondary": str(eq.get("secondary", "")),
+			"armor": str(eq.get("armor", "")),
+		}
+		players[your_id]["quick"] = local_quick.duplicate()
+	_turn_start_quick = local_quick.duplicate()
+	_turn_start_equipped = _local_equipped().duplicate()
 	quick_changed.emit()
 
 
@@ -553,24 +906,38 @@ func _apply_local_weapon(pd: Dictionary) -> void:
 	var raw_ws: Variant = pd.get("weapons", [])
 	if typeof(raw_ws) == TYPE_ARRAY:
 		for item in raw_ws:
-			if typeof(item) == TYPE_DICTIONARY:
-				local_weapons.append((item as Dictionary).duplicate())
+			if typeof(item) != TYPE_DICTIONARY:
+				continue
+			## Skip empty wire slots (unequipped → id "").
+			if str((item as Dictionary).get("id", "")) == "":
+				continue
+			local_weapons.append((item as Dictionary).duplicate())
 	var w: Variant = pd.get("weapon")
-	if local_weapons.is_empty() and typeof(w) == TYPE_DICTIONARY:
+	## Legacy single `weapon` only if it has a real id — never invent a HUD kar98.
+	if local_weapons.is_empty() and typeof(w) == TYPE_DICTIONARY and str(w.get("id", "")) != "":
 		local_weapons.append((w as Dictionary).duplicate())
 	local_active_weapon_idx = clampi(int(pd.get("active_weapon_idx", 0)), 0, maxi(0, local_weapons.size() - 1))
 	_turn_start_weapons = []
 	for item in local_weapons:
 		_turn_start_weapons.append((item as Dictionary).duplicate())
 	_turn_start_active_weapon_idx = local_active_weapon_idx
-	if typeof(w) != TYPE_DICTIONARY and local_active_weapon_idx < local_weapons.size():
-		w = local_weapons[local_active_weapon_idx]
-	ZZLos.apply_weapon(w)
-	shoot_cost = ZZLos.rule_i("shoot_ap")
-	reload_cost = ZZLos.rule_i("weapon_reload_ap")
-	if typeof(w) == TYPE_DICTIONARY:
+	if typeof(w) != TYPE_DICTIONARY or str(w.get("id", "")) == "":
+		if local_active_weapon_idx < local_weapons.size():
+			w = local_weapons[local_active_weapon_idx]
+		else:
+			w = null
+	if typeof(w) == TYPE_DICTIONARY and str(w.get("id", "")) != "":
+		_apply_active_weapon_stats(w)
+		weapons_changed.emit(local_weapons, local_active_weapon_idx)
 		_set_ammo_from_weapon(w)
-	weapons_changed.emit(local_weapons, local_active_weapon_idx)
+	else:
+		shoot_cost = 0
+		reload_cost = 0
+		local_mag_size = 0
+		local_ammo_in_mag = 0
+		local_ammo_reserve = 0
+		weapons_changed.emit(local_weapons, local_active_weapon_idx)
+		ammo_changed.emit(local_ammo_in_mag, local_ammo_reserve)
 
 
 func _player_stat(pd: Dictionary, key: String) -> int:
@@ -598,7 +965,10 @@ func _evaluate_shot_at(from: Vector2i, shooter_posture: String, target_pd: Dicti
 
 
 func _set_ammo_from_weapon(w: Dictionary) -> void:
-	if w.has("mag_size"):
+	var melee := bool(w.get("melee", false)) or ZZLos.is_melee_weapon(str(w.get("id", "")))
+	if melee:
+		local_mag_size = 0
+	elif w.has("mag_size"):
 		local_mag_size = maxi(1, int(w.get("mag_size", local_mag_size)))
 	local_ammo_in_mag = int(w.get("ammo_in_mag", local_ammo_in_mag))
 	local_ammo_reserve = int(w.get("ammo_reserve", local_ammo_reserve))
@@ -824,7 +1194,10 @@ func _play_one_event(e: Dictionary, groups: Array = [], gi: int = 0) -> void:
 			await _play_switch_weapon_event(e)
 		"inventory":
 			pass
-		"shoot":
+		"equip", "unequip", "select_ammo":
+			# Loadout already applied optimistically while planning; final sync via state.
+			pass
+		"shoot", "burst", "duplet":
 			await _play_shoot_event(e)
 		_:
 			pass
@@ -851,10 +1224,7 @@ func _play_switch_weapon_event(e: Dictionary) -> void:
 			if e.has("ammo_in_mag_after"):
 				slot["ammo_in_mag"] = int(e.get("ammo_in_mag_after", 0))
 				slot["ammo_reserve"] = int(e.get("ammo_reserve_after", 0))
-			ZZLos.apply_weapon(slot)
-			shoot_cost = int(slot.get("shoot_ap", shoot_cost))
-			reload_cost = int(slot.get("reload_ap", reload_cost))
-			local_mag_size = maxi(1, int(slot.get("mag_size", local_mag_size)))
+			_apply_active_weapon_stats(slot)
 			weapons_changed.emit(local_weapons, local_active_weapon_idx)
 	await get_tree().create_timer(0.2).timeout
 
@@ -1178,7 +1548,7 @@ func _apply_state(state: Variant, reset_queue: bool, snap_positions: bool) -> vo
 			if pd.has("max_ap"):
 				max_ap = maxi(1, int(pd.get("max_ap", max_ap)))
 			local_hp = hp_val
-			local_medkits = int(pd.get("medkits", medkit_max))
+			local_medkits = int(pd.get("medkits", 0))
 			if pd.has("max_hp"):
 				max_hp = maxi(1, int(pd.get("max_hp", max_hp)))
 				uv.set_max_hp(max_hp)
@@ -1318,14 +1688,20 @@ func _try_show_enemy_aim(g: Vector2i) -> bool:
 	var pd2: Dictionary = players.get(target_id, {})
 	var outcome := _evaluate_shot_at(local_pos, local_posture, pd2)
 	var blocked := bool(outcome.get("blocked", false))
+	var tx := int(pd2.get("x", 0))
+	var ty := int(pd2.get("y", 0))
+	var dist := ZZLos.hex_distance(local_pos.x, local_pos.y, tx, ty)
+	var melee := _active_weapon_melee()
+	var wr := int(_active_weapon_dict().get("range", ZZLos.weapon_range()))
+	var melee_reach := (not melee) or dist <= maxi(1, wr)
+	## Melee out of reach still aimable (target may close); firearms need LOS/AP only.
 	var can_shoot := ZZLos.can_shoot_from(local_posture) and local_ap >= shoot_cost and not blocked
 	uv.set_aim_preview({
 		"blocked": blocked,
 		"chance": float(outcome.get("chance", 0.0)),
 		"can_shoot": can_shoot,
+		"melee_reach": melee_reach,
 	})
-	var tx := int(pd2.get("x", 0))
-	var ty := int(pd2.get("y", 0))
 	grid.set_aim_ray(local_pos, Vector2i(tx, ty), ZZLos.weapon_range())
 	return true
 
@@ -1529,20 +1905,48 @@ func _animate_local_path(cells: Array) -> void:
 
 
 func _queue_shoot(target_id: String) -> void:
-	if local_ap < shoot_cost:
-		return
-	if local_ammo_in_mag <= 0:
-		return
 	if not ZZLos.can_shoot_from(local_posture):
 		return
+	_clamp_fire_mode()
+	var w := _active_weapon_dict()
+	var melee := _active_weapon_melee()
+	var mode := fire_mode
+	var ap_cost := shoot_cost
+	var rounds := 1
+	if mode == "burst":
+		ap_cost = int(w.get("burst_ap", 0))
+		rounds = maxi(1, int(w.get("burst_size", 3)))
+		if not melee and local_ammo_in_mag < rounds:
+			rounds = local_ammo_in_mag
+		if ap_cost <= 0 or rounds < 1:
+			mode = "single"
+			ap_cost = shoot_cost
+			rounds = 1
+	elif mode == "duplet":
+		ap_cost = int(w.get("duplet_ap", 0))
+		rounds = 2
+		if ap_cost <= 0 or (not melee and local_ammo_in_mag < 2):
+			mode = "single"
+			ap_cost = shoot_cost
+			rounds = 1
+	if local_ap < ap_cost:
+		return
+	if not melee and local_ammo_in_mag < rounds:
+		return
 	var pd: Dictionary = players.get(target_id, {})
-	var tx := int(pd.get("x", 0))
-	var ty := int(pd.get("y", 0))
+	## Melee: plan even out of range — target may walk in; server skips if still OOR at resolve.
 	var outcome := _evaluate_shot_at(local_pos, local_posture, pd)
-	action_queue.append(ZZProtocol.shoot_action(target_id))
-	local_ap -= shoot_cost
-	local_ammo_in_mag = maxi(0, local_ammo_in_mag - 1)
-	_sync_active_weapon_ammo_local()
+	match mode:
+		"burst":
+			action_queue.append(ZZProtocol.burst_action(target_id))
+		"duplet":
+			action_queue.append(ZZProtocol.duplet_action(target_id))
+		_:
+			action_queue.append(ZZProtocol.shoot_action(target_id))
+	local_ap -= ap_cost
+	if not melee:
+		local_ammo_in_mag = maxi(0, local_ammo_in_mag - rounds)
+		_sync_active_weapon_ammo_local()
 	ap_changed.emit(local_ap)
 	ammo_changed.emit(local_ammo_in_mag, local_ammo_reserve)
 	weapons_changed.emit(local_weapons, local_active_weapon_idx)
@@ -1569,12 +1973,10 @@ func _recompute_local_from_queue() -> void:
 	for item in _turn_start_weapons:
 		local_weapons.append((item as Dictionary).duplicate())
 	local_active_weapon_idx = _turn_start_active_weapon_idx
+	local_quick = _turn_start_quick.duplicate()
+	_store_local_equipped(_turn_start_equipped.duplicate())
 	if local_active_weapon_idx < local_weapons.size():
-		var aw: Dictionary = local_weapons[local_active_weapon_idx]
-		ZZLos.apply_weapon(aw)
-		shoot_cost = int(aw.get("shoot_ap", shoot_cost))
-		reload_cost = int(aw.get("reload_ap", reload_cost))
-		local_mag_size = maxi(1, int(aw.get("mag_size", local_mag_size)))
+		_apply_active_weapon_stats(local_weapons[local_active_weapon_idx])
 	if unit_nodes.has(your_id):
 		var uv: ZZUnitView = unit_nodes[your_id]
 		if uv != null and is_instance_valid(uv) and not uv.is_dead:
@@ -1598,8 +2000,26 @@ func _recompute_local_from_queue() -> void:
 				local_ap -= mcost
 			"shoot":
 				local_ap -= shoot_cost
-				local_ammo_in_mag = maxi(0, local_ammo_in_mag - 1)
-				_sync_active_weapon_ammo_local()
+				if not _active_weapon_melee():
+					local_ammo_in_mag = maxi(0, local_ammo_in_mag - 1)
+					_sync_active_weapon_ammo_local()
+				run_streak = 0
+			"burst":
+				var bw := _active_weapon_dict()
+				local_ap -= int(bw.get("burst_ap", shoot_cost))
+				var br := maxi(1, int(bw.get("burst_size", 3)))
+				if not _active_weapon_melee():
+					if local_ammo_in_mag < br:
+						br = local_ammo_in_mag
+					local_ammo_in_mag = maxi(0, local_ammo_in_mag - br)
+					_sync_active_weapon_ammo_local()
+				run_streak = 0
+			"duplet":
+				var dw := _active_weapon_dict()
+				local_ap -= int(dw.get("duplet_ap", shoot_cost))
+				if not _active_weapon_melee():
+					local_ammo_in_mag = maxi(0, local_ammo_in_mag - 2)
+					_sync_active_weapon_ammo_local()
 				run_streak = 0
 			"posture":
 				local_posture = str(act.get("posture", "stand"))
@@ -1623,6 +2043,15 @@ func _recompute_local_from_queue() -> void:
 			"inventory":
 				local_ap -= inventory_ap_cost
 				run_streak = 0
+			"equip":
+				_apply_local_equip(str(act.get("item_id", "")), str(act.get("slot", "")))
+				run_streak = 0
+			"unequip":
+				_apply_local_unequip(str(act.get("slot", "")))
+				run_streak = 0
+			"select_ammo":
+				_apply_local_select_ammo(str(act.get("item_id", "")))
+				run_streak = 0
 	if unit_nodes.has(your_id):
 		var uv2: ZZUnitView = unit_nodes[your_id]
 		if uv2 != null and is_instance_valid(uv2) and not uv2.is_dead:
@@ -1635,12 +2064,14 @@ func _recompute_local_from_queue() -> void:
 	medkits_changed.emit(local_medkits)
 	ammo_changed.emit(local_ammo_in_mag, local_ammo_reserve)
 	weapons_changed.emit(local_weapons, local_active_weapon_idx)
+	quick_changed.emit()
 	_refresh_unit_outlines()
 	_emit_history()
 	# Re-preview last shoot if present.
 	if not action_queue.is_empty():
 		var last: Dictionary = action_queue[action_queue.size() - 1]
-		if str(last.get("type", "")) == "shoot":
+		var last_t := str(last.get("type", ""))
+		if last_t == "shoot" or last_t == "burst" or last_t == "duplet":
 			var tid := str(last.get("target_id", ""))
 			var tpd: Dictionary = players.get(tid, {})
 			var outcome := _evaluate_shot_at(local_pos, local_posture, tpd)
@@ -1681,7 +2112,7 @@ func _emit_history() -> void:
 				move_end = sim_pos
 				move_run += 1
 				move_ap += step_c
-			"shoot":
+			"shoot", "burst", "duplet":
 				_flush_move_history(lines, move_run, move_end, move_ap)
 				move_run = 0
 				move_ap = 0
@@ -1690,11 +2121,16 @@ func _emit_history() -> void:
 				var nick := str(players.get(tid, {}).get("nick", tid))
 				var tpd: Dictionary = players.get(tid, {})
 				var outcome := _evaluate_shot_at(sim_pos, sim_posture, tpd)
+				var kind := "Выстрел"
+				if str(act.get("type", "")) == "burst":
+					kind = "Очередь"
+				elif str(act.get("type", "")) == "duplet":
+					kind = "Дуплет"
 				if bool(outcome.get("blocked", false)):
-					lines.append("Выстрел → %s (блок)" % nick)
+					lines.append("%s → %s (блок)" % [kind, nick])
 				else:
 					var pct := int(round(float(outcome.get("chance", 0.0)) * 100.0))
-					lines.append("Выстрел → %s (%d%%)" % [nick, pct])
+					lines.append("%s → %s (%d%%)" % [kind, nick, pct])
 			"posture":
 				_flush_move_history(lines, move_run, move_end, move_ap)
 				move_run = 0
@@ -1744,5 +2180,27 @@ func _emit_history() -> void:
 				move_ap = 0
 				run_streak = 0
 				lines.append("Инвентарь · %d ОД" % inventory_ap_cost)
+			"equip":
+				_flush_move_history(lines, move_run, move_end, move_ap)
+				move_run = 0
+				move_ap = 0
+				run_streak = 0
+				var eid := str(act.get("item_id", ""))
+				var ename := str(ZZLos.item_def(eid).get("name", eid))
+				lines.append("Экипировка: %s" % ename)
+			"unequip":
+				_flush_move_history(lines, move_run, move_end, move_ap)
+				move_run = 0
+				move_ap = 0
+				run_streak = 0
+				lines.append("Снять: %s" % str(act.get("slot", "")))
+			"select_ammo":
+				_flush_move_history(lines, move_run, move_end, move_ap)
+				move_run = 0
+				move_ap = 0
+				run_streak = 0
+				var aid := str(act.get("item_id", ""))
+				var aname := str(ZZLos.item_def(aid).get("name", aid))
+				lines.append("Патроны: %s" % aname)
 	_flush_move_history(lines, move_run, move_end, move_ap)
 	history_changed.emit(lines)
