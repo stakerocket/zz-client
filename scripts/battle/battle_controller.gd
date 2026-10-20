@@ -1335,9 +1335,27 @@ func _play_shoot_event(e: Dictionary) -> void:
 	var damage := int(e.get("damage", 0))
 	var hp_after := int(e.get("hp_after", 0))
 	var crit := bool(e.get("crit", false))
+	var act_type := str(e.get("type", "shoot"))
+	var hits_v: Variant = e.get("hits", [])
+	var hits: Array = hits_v if typeof(hits_v) == TYPE_ARRAY else []
 	if damage > 0:
 		Sfx.play_hit_target()
-		await target.apply_hit(damage, hp_after, _is_death_front_blocked(target_id, target), crit)
+		var blocked := _is_death_front_blocked(target_id, target)
+		# Duplet: one float (total after ПУ); crit style if any barrel critted.
+		if act_type == "duplet":
+			await target.apply_hit(damage, hp_after, blocked, crit)
+		elif hits.size() > 1:
+			await target.apply_hits(hits, hp_after, blocked)
+		elif hits.size() == 1:
+			var h0: Variant = hits[0]
+			var hcrit := crit
+			var hdmg := damage
+			if typeof(h0) == TYPE_DICTIONARY:
+				hdmg = int(h0.get("damage", damage))
+				hcrit = bool(h0.get("crit", crit))
+			await target.apply_hit(hdmg, hp_after, blocked, hcrit)
+		else:
+			await target.apply_hit(damage, hp_after, blocked, crit)
 	else:
 		Sfx.play_miss()
 		await target.apply_miss()

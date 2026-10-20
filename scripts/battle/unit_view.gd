@@ -602,6 +602,35 @@ func apply_hit(damage: int, hp_after: int, front_blocked: bool = false, crit: bo
 		await play_death(front_blocked)
 
 
+## hits: Array of {damage, crit} — one float per cartridge (burst).
+func apply_hits(hits: Array, hp_after: int, front_blocked: bool = false) -> void:
+	if hits.is_empty():
+		await flash_hit()
+		set_hp(hp_after, false)
+		return
+	var shown := 0
+	for i in range(hits.size()):
+		var h: Variant = hits[i]
+		if typeof(h) != TYPE_DICTIONARY:
+			continue
+		var dmg := int(h.get("damage", 0))
+		var is_crit := bool(h.get("crit", false))
+		if dmg <= 0:
+			continue
+		if shown > 0:
+			await get_tree().create_timer(0.2).timeout
+		# Column: step up + slight alternate X so numbers don't overlap.
+		var x_off := 0.28 if (shown % 2) == 0 else -0.28
+		var y_off := float(shown) * 0.55
+		show_damage_number(dmg, is_crit, x_off, y_off)
+		shown += 1
+	await flash_hit()
+	var will_die := hp > 0 and hp_after <= 0 and not is_dead
+	set_hp(hp_after, false)
+	if will_die:
+		await play_death(front_blocked)
+
+
 func apply_heal(heal: int, hp_after: int) -> void:
 	if heal > 0:
 		show_heal_number(heal)
@@ -673,33 +702,33 @@ func animate_move_to(world_pos: Vector3, with_sfx: bool = false, stop_at_end: bo
 			_play_idle()
 
 
-func show_damage_number(damage: int, crit: bool = false) -> void:
+func show_damage_number(damage: int, crit: bool = false, x_off: float = 0.0, y_off: float = 0.0) -> void:
 	if crit:
-		_float_label("крит -%d" % damage, Color(1.0, 0.85, 0.2, 1.0))
+		_float_label("крит -%d" % damage, Color(1.0, 0.85, 0.2, 1.0), x_off, y_off)
 	else:
-		_float_label("-%d" % damage, Color(1.0, 0.35, 0.25, 1.0))
+		_float_label("-%d" % damage, Color(1.0, 0.35, 0.25, 1.0), x_off, y_off)
 
 
 func show_miss() -> void:
 	_float_label("мимо", Color(0.75, 0.78, 0.85, 1.0))
 
 
-func _float_label(text: String, col: Color) -> void:
+func _float_label(text: String, col: Color, x_off: float = 0.0, y_off: float = 0.0) -> void:
 	var lbl := Label3D.new()
 	lbl.text = text
 	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	lbl.font_size = FONT_FLOAT
 	lbl.outline_size = 18
 	lbl.modulate = col
-	lbl.position = Vector3(0, CAPSULE_HEIGHT + 0.95, 0)
-	lbl.render_priority = 16
+	lbl.position = Vector3(x_off, CAPSULE_HEIGHT + 0.95 + y_off, 0)
+	lbl.render_priority = 16 + int(y_off * 10.0)
 	lbl.no_depth_test = true
 	add_child(lbl)
 	var start_y := lbl.position.y
 	var tw := create_tween()
 	tw.set_parallel(true)
-	tw.tween_property(lbl, "position:y", start_y + 0.9, 0.7).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tw.tween_property(lbl, "modulate:a", 0.0, 0.7).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	tw.tween_property(lbl, "position:y", start_y + 0.7, 0.75).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(lbl, "modulate:a", 0.0, 0.75).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
 	tw.chain().tween_callback(lbl.queue_free)
 
 
