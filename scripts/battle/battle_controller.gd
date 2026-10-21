@@ -1353,14 +1353,10 @@ func _play_shoot_event(e: Dictionary) -> void:
 	if rounds <= 0:
 		rounds = 1
 	## Burst: one gunshot SFX per cartridge (also on miss/wall — fire still happened).
-	## Uzi clip is already a full burst — play once.
-	var sfx_rounds := 1 if weapon_id == "uzi" else rounds
-	var shot_gap := 0.0
-	if sfx_rounds > 1:
-		shot_gap = 0.075 if act_type == "burst" else (0.04 if act_type == "duplet" else 0.0)
-	for i in range(sfx_rounds):
+	var shot_gap := 0.075 if act_type == "burst" else (0.04 if act_type == "duplet" else 0.0)
+	for i in range(rounds):
 		Sfx.play_shoot(weapon_id, act_type)
-		if shot_gap > 0.0 and i < sfx_rounds - 1:
+		if shot_gap > 0.0 and i < rounds - 1:
 			await get_tree().create_timer(shot_gap).timeout
 	await get_tree().create_timer(0.08).timeout
 	await _fly_projectile(_unit_muzzle(actor), impact, actor.color)
