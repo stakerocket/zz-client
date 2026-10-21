@@ -15,8 +15,10 @@ func main() {
 	if len(os.Args) > 1 {
 		outDir = os.Args[1]
 	}
+	weaponDir := filepath.Join(outDir, "weapon")
 	_ = os.MkdirAll(outDir, 0o755)
-	mustWrite(filepath.Join(outDir, "shoot.wav"), synthGunBang())
+	_ = os.MkdirAll(weaponDir, 0o755)
+	mustWrite(filepath.Join(weaponDir, "shoot.wav"), synthGunBang())
 	mustWrite(filepath.Join(outDir, "death.wav"), synthScream())
 	mustWrite(filepath.Join(outDir, "walk.wav"), synthWalk())
 }

@@ -16,6 +16,8 @@
 - `USE_PROD = false` → `ws://127.0.0.1:8080/ws` (локально)
 - `USE_PROD = true` → `ws://103.167.235.247:8080/ws` (прод)
 
+Сборка `.exe` в `build/ZoneZero.exe` (на время экспорта `USE_PROD := true`, потом снова `false`): [docs/BUILD.md](../docs/BUILD.md).
+
 Протокол и запуск сервера — [server/README.md](../server/README.md). Архитектура — [server/docs/ARCHITECTURE.md](../server/docs/ARCHITECTURE.md). Характеристики — [server/docs/CHARACTER_STATS.md](../server/docs/CHARACTER_STATS.md).
 
 Координаты 2D UI vs 3D карта (упор камеры к чату) — [docs/CAMERA_UI_COORDS.md](docs/CAMERA_UI_COORDS.md).

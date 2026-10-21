@@ -18,6 +18,10 @@ static func find_match(nick: String) -> Dictionary:
 	return {"type": "find_match", "nick": nick}
 
 
+static func cancel_match() -> Dictionary:
+	return {"type": "cancel_match"}
+
+
 static func end_turn(actions: Array) -> Dictionary:
 	return {"type": "end_turn", "actions": actions}
 

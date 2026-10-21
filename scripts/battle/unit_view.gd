@@ -618,11 +618,9 @@ func apply_hits(hits: Array, hp_after: int, front_blocked: bool = false) -> void
 		if dmg <= 0:
 			continue
 		if shown > 0:
-			await get_tree().create_timer(0.2).timeout
-		# Column: step up + slight alternate X so numbers don't overlap.
-		var x_off := 0.28 if (shown % 2) == 0 else -0.28
-		var y_off := float(shown) * 0.55
-		show_damage_number(dmg, is_crit, x_off, y_off)
+			await get_tree().create_timer(0.22).timeout
+		# Vertical column only (no side shift).
+		show_damage_number(dmg, is_crit, 0.0, float(shown) * 0.78)
 		shown += 1
 	await flash_hit()
 	var will_die := hp > 0 and hp_after <= 0 and not is_dead
@@ -720,7 +718,7 @@ func _float_label(text: String, col: Color, x_off: float = 0.0, y_off: float = 0
 	lbl.font_size = FONT_FLOAT
 	lbl.outline_size = 18
 	lbl.modulate = col
-	lbl.position = Vector3(x_off, CAPSULE_HEIGHT + 0.95 + y_off, 0)
+	lbl.position = Vector3(x_off, CAPSULE_HEIGHT + 1.38 + y_off, 0)
 	lbl.render_priority = 16 + int(y_off * 10.0)
 	lbl.no_depth_test = true
 	add_child(lbl)

@@ -98,6 +98,8 @@ func _ready() -> void:
 
 	ui.continue_pressed.connect(_on_continue)
 	ui.find_match_pressed.connect(_on_find_match)
+	ui.cancel_match_pressed.connect(_on_cancel_match)
+	battle.queue_left.connect(func(): ui.set_searching(false))
 	ui.end_turn_pressed.connect(battle.request_end_turn)
 	ui.undo_pressed.connect(battle.request_undo)
 	ui.posture_pressed.connect(battle.request_posture)
@@ -230,6 +232,12 @@ func _on_find_match() -> void:
 		ui.show_login(false)
 		var err := battle.last_connect_error
 		ui.set_login_error(err if err != "" else "Сервер недоступен")
+
+
+func _on_cancel_match() -> void:
+	battle.cancel_find_match()
+	## Optimistic UI; server confirms with queue_left.
+	ui.set_searching(false)
 
 
 func _on_battle_started() -> void:

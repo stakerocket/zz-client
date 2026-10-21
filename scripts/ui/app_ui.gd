@@ -3,6 +3,7 @@ class_name ZZAppUI
 
 signal continue_pressed(nick: String)
 signal find_match_pressed
+signal cancel_match_pressed
 signal end_turn_pressed
 signal undo_pressed
 signal posture_pressed(posture: String)
@@ -87,6 +88,7 @@ var _lobby_unspent: Label
 var _lobby_profile: Dictionary = {}
 var _lobby_stat_btns: Dictionary = {} # stat -> {minus, plus, value label}
 var _updating_lobby_profile: bool = false
+var _searching: bool = false
 
 @onready var chat_tabs: TabContainer = $ChatDock/Margin/MainRow/ChatCol/Tabs
 @onready var lobby_chat_log: RichTextLabel = $ChatDock/Margin/MainRow/ChatCol/Tabs/Лобби
@@ -132,7 +134,7 @@ var _fire_mode_hint: String = "Одиночный"
 func _ready() -> void:
 	continue_btn.pressed.connect(_on_continue)
 	nick_edit.text_submitted.connect(func(_t): _on_continue())
-	find_btn.pressed.connect(func(): find_match_pressed.emit())
+	find_btn.pressed.connect(_on_find_btn_pressed)
 	_setup_lobby_profile_controls()
 	if inventory_btn != null:
 		inventory_btn.pressed.connect(_on_inventory_btn)
@@ -343,17 +345,26 @@ func show_battle_result(won: bool) -> void:
 
 
 func set_find_enabled(enabled: bool) -> void:
+	_searching = false
 	find_btn.disabled = not enabled
 	if enabled:
 		find_btn.text = "Найти бой"
 
 
 func set_searching(searching: bool) -> void:
+	_searching = searching
 	if searching:
-		find_btn.disabled = true
-		find_btn.text = "Поиск..."
+		find_btn.disabled = false
+		find_btn.text = "Отменить"
 	else:
 		set_find_enabled(true)
+
+
+func _on_find_btn_pressed() -> void:
+	if _searching:
+		cancel_match_pressed.emit()
+	else:
+		find_match_pressed.emit()
 
 
 func set_room_players(nicks: Array) -> void:
@@ -793,6 +804,7 @@ func _setup_posture_tips() -> void:
 		["Смена", "%d ОД" % ap],
 		["Уклонение", "%+d" % dodge_cover],
 		["Движение", "нет"],
+		["Выстрел", "авто → сидя (+%d ОД)" % ap],
 	])
 	_clear_ap_badge(stand_btn)
 	_clear_ap_badge(sit_btn)
@@ -955,7 +967,7 @@ func _on_weapon_slot_pressed(slot: int) -> void:
 
 
 func _on_weapon_slot_gui_input(event: InputEvent, slot: int) -> void:
-	## ПКМ по активному стволу — перезарядка (ЛКМ: смена / режим огня).
+	## ПКМ по активному стволу — всегда перезарядка (ЛКМ — режим огня / смена слота).
 	if not (event is InputEventMouseButton and event.pressed):
 		return
 	var mb := event as InputEventMouseButton
@@ -1075,8 +1087,14 @@ func _fill_weapon_btn(btn: Button, slot: int) -> void:
 			shot_lbl.text = "Оч: %d" % int(w.get("burst_ap", shoot_ap))
 		elif slot == _active_weapon_idx and _fire_mode_hint == "Дуплет":
 			shot_lbl.text = "Ду: %d" % int(w.get("duplet_ap", shoot_ap))
-		else:
+		elif shoot_ap > 0:
 			shot_lbl.text = "ОД: %d" % shoot_ap
+		elif int(w.get("burst_ap", 0)) > 0:
+			shot_lbl.text = "Оч: %d" % int(w.get("burst_ap"))
+		elif int(w.get("duplet_ap", 0)) > 0:
+			shot_lbl.text = "Ду: %d" % int(w.get("duplet_ap"))
+		else:
+			shot_lbl.text = "ОД: —"
 		shot_lbl.add_theme_font_size_override("font_size", 9)
 		shot_lbl.offset_left = CARD_PAD_X
 	if reload_row != null:
@@ -1138,17 +1156,17 @@ func _fill_weapon_btn(btn: Button, slot: int) -> void:
 			if loaded != "":
 				extra.append(["Заряжено", str(ZZLos.item_def(loaded).get("name", loaded))])
 			if show_reload:
-				extra.append(["Перезарядка", "%s ОД · ПКМ" % ZZItemTooltip.fmt_val(reload_ap)])
+				var reload_hint := "%s ОД" % ZZItemTooltip.fmt_val(reload_ap)
+				if slot == _active_weapon_idx:
+					reload_hint += " · ПКМ"
+				extra.append(["Перезарядка", reload_hint])
 		if int(w.get("burst_ap", 0)) > 0:
 			extra.append(["Очередь", "%s ОД" % ZZItemTooltip.fmt_val(w.get("burst_ap"))])
 		if int(w.get("duplet_ap", 0)) > 0:
 			extra.append(["Дуплет", "%s ОД" % ZZItemTooltip.fmt_val(w.get("duplet_ap"))])
-		if slot == _active_weapon_idx:
-			if not melee and (int(w.get("burst_ap", 0)) > 0 or int(w.get("duplet_ap", 0)) > 0):
-				extra.append(["Режим", _fire_mode_hint])
-				extra.append(["Смена режима", "клик по слоту"])
-			elif not melee:
-				extra.append(["Перезарядка", "клик / ПКМ"])
+		if slot == _active_weapon_idx and not melee and (int(w.get("burst_ap", 0)) > 0 or int(w.get("duplet_ap", 0)) > 0):
+			extra.append(["Режим", _fire_mode_hint])
+			extra.append(["Смена режима", "ЛКМ"])
 		tip.tip_extra = extra
 	btn.tooltip_text = " "  # non-empty → custom tip
 	var col: HBoxContainer = btn.get_node_or_null("AmmoRow/AmmoCol")

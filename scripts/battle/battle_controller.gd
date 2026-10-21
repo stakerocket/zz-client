@@ -33,6 +33,7 @@ signal battle_started
 signal battle_ended(winner_id: String)
 signal room_players_changed(nicks: Array)
 signal chat_received(nick: String, text: String, channel: String)
+signal queue_left
 signal rules_changed
 signal inventory_state_received(data: Dictionary)
 signal battle_inventory_opened(data: Dictionary)
@@ -371,6 +372,7 @@ func _rebuild_weapons_from_equipped() -> void:
 		return
 	var aw: Dictionary = local_weapons[local_active_weapon_idx]
 	_apply_active_weapon_stats(aw)
+	_clamp_fire_mode()
 	_set_ammo_from_weapon(aw)
 	weapons_changed.emit(local_weapons, local_active_weapon_idx)
 	ammo_changed.emit(local_ammo_in_mag, local_ammo_reserve)
@@ -506,6 +508,12 @@ func connect_and_find(nick: String) -> bool:
 	return true
 
 
+func cancel_find_match() -> void:
+	if not ws.is_open():
+		return
+	ws.send_dict(ZZProtocol.cancel_match())
+
+
 func request_end_turn() -> void:
 	if input_locked or not in_battle or _playing_events or _end_turn_sent:
 		return
@@ -560,6 +568,8 @@ func request_reload() -> void:
 	local_ammo_in_mag = after.x
 	local_ammo_reserve = after.y
 	_sync_active_weapon_ammo_local()
+	## Immediate UI click; resolve also plays reload SFX for all actors.
+	Sfx.play_reload()
 	ap_changed.emit(local_ap)
 	ammo_changed.emit(local_ammo_in_mag, local_ammo_reserve)
 	weapons_changed.emit(local_weapons, local_active_weapon_idx)
@@ -572,18 +582,15 @@ func request_weapon_slot(slot_index: int) -> void:
 	if slot_index < 0 or slot_index >= local_weapons.size():
 		return
 	if slot_index == local_active_weapon_idx:
-		## Несколько режимов — цикл; иначе ЛКМ = перезарядка (ПКМ тоже).
-		if _available_fire_modes().size() > 1:
-			cycle_fire_mode()
-		else:
-			request_reload()
+		## ЛКМ по активному слоту — всегда смена режима огня (ПКМ — перезарядка).
+		cycle_fire_mode()
 		return
 	request_switch_weapon(slot_index)
 
 
 func cycle_fire_mode() -> void:
 	var modes := _available_fire_modes()
-	if modes.is_empty():
+	if modes.size() <= 1:
 		return
 	var idx := modes.find(fire_mode)
 	if idx < 0:
@@ -591,13 +598,16 @@ func cycle_fire_mode() -> void:
 	else:
 		idx = (idx + 1) % modes.size()
 	fire_mode = str(modes[idx])
+	Sfx.play_click()
 	fire_mode_changed.emit(fire_mode)
 	_emit_history()
 
 
 func _available_fire_modes() -> Array:
-	var modes: Array = ["single"]
+	var modes: Array = []
 	var w := _active_weapon_dict()
+	if int(w.get("shoot_ap", 0)) > 0:
+		modes.append("single")
 	if int(w.get("burst_ap", 0)) > 0:
 		modes.append("burst")
 	if int(w.get("duplet_ap", 0)) > 0:
@@ -619,8 +629,10 @@ func _active_weapon_melee() -> bool:
 
 func _clamp_fire_mode() -> void:
 	var modes := _available_fire_modes()
+	if modes.is_empty():
+		return
 	if modes.find(fire_mode) < 0:
-		fire_mode = "single"
+		fire_mode = str(modes[0])
 		fire_mode_changed.emit(fire_mode)
 
 
@@ -636,6 +648,7 @@ func request_switch_weapon(slot_index: int) -> void:
 	action_queue.append(ZZProtocol.switch_weapon_action(slot_index))
 	local_ap -= switch_weapon_cost
 	_apply_local_switch(slot_index)
+	Sfx.play_weapon_switch()
 	ap_changed.emit(local_ap)
 	_emit_history()
 
@@ -643,7 +656,8 @@ func request_switch_weapon(slot_index: int) -> void:
 func _apply_local_switch(slot_index: int) -> void:
 	_sync_active_weapon_ammo_local()
 	local_active_weapon_idx = slot_index
-	fire_mode = "single"
+	var modes := _available_fire_modes()
+	fire_mode = str(modes[0]) if not modes.is_empty() else "single"
 	fire_mode_changed.emit(fire_mode)
 	var w: Dictionary = local_weapons[slot_index]
 	_apply_active_weapon_stats(w)
@@ -744,6 +758,8 @@ func _on_message(data: Dictionary) -> void:
 			chat_received.emit(str(data.get("nick", "?")), str(data.get("text", "")), ch)
 		"queued":
 			pass
+		"queue_left":
+			queue_left.emit()
 		"battle_start":
 			_apply_battle_start(data)
 		"turn_timeout":
@@ -928,6 +944,7 @@ func _apply_local_weapon(pd: Dictionary) -> void:
 			w = null
 	if typeof(w) == TYPE_DICTIONARY and str(w.get("id", "")) != "":
 		_apply_active_weapon_stats(w)
+		_clamp_fire_mode()
 		weapons_changed.emit(local_weapons, local_active_weapon_idx)
 		_set_ammo_from_weapon(w)
 	else:
@@ -1226,13 +1243,18 @@ func _play_switch_weapon_event(e: Dictionary) -> void:
 				slot["ammo_reserve"] = int(e.get("ammo_reserve_after", 0))
 			_apply_active_weapon_stats(slot)
 			weapons_changed.emit(local_weapons, local_active_weapon_idx)
-	await get_tree().create_timer(0.2).timeout
+	if actor_id != your_id:
+		Sfx.play_weapon_switch()
+	await get_tree().create_timer(0.25).timeout
 
 
 func _play_reload_event(e: Dictionary) -> void:
 	var actor_id := str(e.get("actor_id", ""))
 	_apply_ammo_after_event(actor_id, e)
-	await get_tree().create_timer(0.25).timeout
+	## Local already heard SFX on ПКМ queue; opponents hear it on resolve.
+	if actor_id != your_id:
+		Sfx.play_reload()
+	await get_tree().create_timer(0.35).timeout
 
 
 func _play_medkit_event(e: Dictionary) -> void:
@@ -1322,10 +1344,28 @@ func _play_shoot_event(e: Dictionary) -> void:
 	actor.face_world(impact)
 	# Fire pose + bolt slightly overlap for snappier feedback.
 	actor.play_fire()
-	Sfx.play_shoot()
-	await get_tree().create_timer(0.12).timeout
+	var act_type := str(e.get("type", "shoot"))
+	var weapon_id := str(e.get("weapon_id", ""))
+	var rounds := int(e.get("rounds", 0))
+	var hits_preview: Variant = e.get("hits", [])
+	if rounds <= 0 and typeof(hits_preview) == TYPE_ARRAY:
+		rounds = (hits_preview as Array).size()
+	if rounds <= 0:
+		rounds = 1
+	## Burst: one gunshot SFX per cartridge (also on miss/wall — fire still happened).
+	## Uzi clip is already a full burst — play once.
+	var sfx_rounds := 1 if weapon_id == "uzi" else rounds
+	var shot_gap := 0.0
+	if sfx_rounds > 1:
+		shot_gap = 0.075 if act_type == "burst" else (0.04 if act_type == "duplet" else 0.0)
+	for i in range(sfx_rounds):
+		Sfx.play_shoot(weapon_id, act_type)
+		if shot_gap > 0.0 and i < sfx_rounds - 1:
+			await get_tree().create_timer(shot_gap).timeout
+	await get_tree().create_timer(0.08).timeout
 	await _fly_projectile(_unit_muzzle(actor), impact, actor.color)
 	if hit_wall:
+		## Don't play miss.wav here — it was stealing the gunshot pool slot.
 		Sfx.play_hit_wall()
 		await _wall_burst_at(impact)
 		return
@@ -1335,11 +1375,9 @@ func _play_shoot_event(e: Dictionary) -> void:
 	var damage := int(e.get("damage", 0))
 	var hp_after := int(e.get("hp_after", 0))
 	var crit := bool(e.get("crit", false))
-	var act_type := str(e.get("type", "shoot"))
 	var hits_v: Variant = e.get("hits", [])
 	var hits: Array = hits_v if typeof(hits_v) == TYPE_ARRAY else []
 	if damage > 0:
-		Sfx.play_hit_target()
 		var blocked := _is_death_front_blocked(target_id, target)
 		# Duplet: one float (total after ПУ); crit style if any barrel critted.
 		if act_type == "duplet":
@@ -1357,7 +1395,7 @@ func _play_shoot_event(e: Dictionary) -> void:
 		else:
 			await target.apply_hit(damage, hp_after, blocked, crit)
 	else:
-		Sfx.play_miss()
+		## Miss: gunshot(s) already played; keep «мимо» float, no old miss.wav.
 		await target.apply_miss()
 		target.set_hp(hp_after, true, _is_death_front_blocked(target_id, target))
 	if players.has(target_id):
@@ -1704,7 +1742,13 @@ func _try_show_enemy_aim(g: Vector2i) -> bool:
 	if uv == null or not is_instance_valid(uv):
 		return true
 	var pd2: Dictionary = players.get(target_id, {})
-	var outcome := _evaluate_shot_at(local_pos, local_posture, pd2)
+	## Aim as sit if rising from cover (same as auto-queue).
+	var aim_posture := local_posture
+	var rise_cost := 0
+	if local_posture == "cover":
+		aim_posture = "sit"
+		rise_cost = posture_cost
+	var outcome := _evaluate_shot_at(local_pos, aim_posture, pd2)
 	var blocked := bool(outcome.get("blocked", false))
 	var tx := int(pd2.get("x", 0))
 	var ty := int(pd2.get("y", 0))
@@ -1713,7 +1757,13 @@ func _try_show_enemy_aim(g: Vector2i) -> bool:
 	var wr := int(_active_weapon_dict().get("range", ZZLos.weapon_range()))
 	var melee_reach := (not melee) or dist <= maxi(1, wr)
 	## Melee out of reach still aimable (target may close); firearms need LOS/AP only.
-	var can_shoot := ZZLos.can_shoot_from(local_posture) and local_ap >= shoot_cost and not blocked
+	var can_fire_pose := ZZLos.can_shoot_from(local_posture) or local_posture == "cover"
+	var fire_ap := shoot_cost
+	if fire_mode == "burst":
+		fire_ap = int(_active_weapon_dict().get("burst_ap", 0))
+	elif fire_mode == "duplet":
+		fire_ap = int(_active_weapon_dict().get("duplet_ap", 0))
+	var can_shoot := can_fire_pose and fire_ap > 0 and local_ap >= fire_ap + rise_cost and not blocked
 	uv.set_aim_preview({
 		"blocked": blocked,
 		"chance": float(outcome.get("chance", 0.0)),
@@ -1923,7 +1973,9 @@ func _animate_local_path(cells: Array) -> void:
 
 
 func _queue_shoot(target_id: String) -> void:
-	if not ZZLos.can_shoot_from(local_posture):
+	## From cover: auto sit (+posture AP) then fire. Server still rejects naked shoot-from-cover.
+	var rise_from_cover := local_posture == "cover"
+	if not ZZLos.can_shoot_from(local_posture) and not rise_from_cover:
 		return
 	_clamp_fire_mode()
 	var w := _active_weapon_dict()
@@ -1937,20 +1989,24 @@ func _queue_shoot(target_id: String) -> void:
 		if not melee and local_ammo_in_mag < rounds:
 			rounds = local_ammo_in_mag
 		if ap_cost <= 0 or rounds < 1:
-			mode = "single"
-			ap_cost = shoot_cost
-			rounds = 1
+			return
 	elif mode == "duplet":
 		ap_cost = int(w.get("duplet_ap", 0))
 		rounds = 2
 		if ap_cost <= 0 or (not melee and local_ammo_in_mag < 2):
-			mode = "single"
-			ap_cost = shoot_cost
-			rounds = 1
-	if local_ap < ap_cost:
+			return
+	elif shoot_cost <= 0:
+		return
+	var rise_cost := posture_cost if rise_from_cover else 0
+	if local_ap < rise_cost + ap_cost:
 		return
 	if not melee and local_ammo_in_mag < rounds:
 		return
+	if rise_from_cover:
+		action_queue.append(ZZProtocol.posture_action("sit"))
+		local_ap -= rise_cost
+		local_posture = "sit"
+		_apply_local_posture_visual()
 	var pd: Dictionary = players.get(target_id, {})
 	## Melee: plan even out of range — target may walk in; server skips if still OOR at resolve.
 	var outcome := _evaluate_shot_at(local_pos, local_posture, pd)
