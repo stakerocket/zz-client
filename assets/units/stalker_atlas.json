@@ -1,0 +1,9 @@
+﻿{
+  "frames": 8,
+  "names": ["idle_0","idle_1","walk_0","walk_1","walk_2","sit","cover","death"],
+  "cell_w": 164,
+  "cell_h": 212,
+  "pad": 2,
+  "content_w": 160,
+  "content_h": 208
+}

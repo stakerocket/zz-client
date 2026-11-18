@@ -2,24 +2,20 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://badmxkevwtblj"
-path.s3tc="res://.godot/imported/man_adventurer+character+3d+model_Clone1_rm.png-0b2d9f77dd922f547f59948b4a7de3b9.s3tc.ctex"
+uid="uid://diytlqhjnudsx"
+path="res://.godot/imported/stalker_idle_1_64.png-02c7fc7aa94c74cc53efcbebaf170259.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
-"vram_texture": true
-}
-generator_parameters={
-"md5": "8058c6a89135e786e72d746b500e338f"
+"vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/units/man_adventurer+character+3d+model_Clone1_rm.png"
-dest_files=["res://.godot/imported/man_adventurer+character+3d+model_Clone1_rm.png-0b2d9f77dd922f547f59948b4a7de3b9.s3tc.ctex"]
+source_file="res://assets/units/stalker_idle_1_64.png"
+dest_files=["res://.godot/imported/stalker_idle_1_64.png-02c7fc7aa94c74cc53efcbebaf170259.ctex"]
 
 [params]
 
-compress/mode=2
+compress/mode=0
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -27,7 +23,7 @@ compress/rdo_quality_loss=0.0
 compress/hdr_compression=1
 compress/normal_map=0
 compress/channel_pack=0
-mipmaps/generate=true
+mipmaps/generate=false
 mipmaps/limit=-1
 roughness/mode=0
 roughness/src_normal=""
@@ -41,4 +37,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=0
+detect_3d/compress_to=1

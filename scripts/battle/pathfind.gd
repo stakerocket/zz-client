@@ -2,11 +2,11 @@ extends RefCounted
 class_name ZZPathfind
 
 ## Hex BFS. Searches up to max_steps (preview horizon), independent of current AP.
-## budget_ap only marks how much of the path is affordable this turn.
+## budget_ap marks how much of the path is affordable this turn (UI shows only that).
 ## Returns { path, ap, affordable_steps } — path excludes start; affordable_steps is
 ## how many leading steps fit in budget_ap (0 if none).
 ## Caller sets max_steps (e.g. ceil(player_max_ap * 2)).
-## ap_frac > 0: per-hex AP = ap_frac with ceil on path total (run); step_ap ignored for billing.
+## ap_frac > 0: run billing via run_extra_ap; step_ap ignored for billing.
 
 
 static func find_path(
@@ -16,8 +16,8 @@ static func find_path(
 	blocked: Dictionary,
 	step_ap: int,
 	budget_ap: int,
-	grid_cols: int = 40,
-	grid_rows: int = 30,
+	grid_cols: int = 60,
+	grid_rows: int = 45,
 	max_steps: int = 24,
 	ap_frac: float = 0.0,
 	run_streak: int = 0
@@ -132,6 +132,70 @@ static func run_extra_ap(streak: int, extra_steps: int) -> int:
 		return 0
 	var s := maxi(0, streak)
 	return run_path_ap(s + extra_steps) - run_path_ap(s)
+
+
+## All cells reachable with budget_ap this turn (excludes start). Empty if no move.
+static func reachable_cells(
+	from: Vector2i,
+	walls: Dictionary,
+	blocked: Dictionary,
+	step_ap: int,
+	budget_ap: int,
+	grid_cols: int = 60,
+	grid_rows: int = 45,
+	ap_frac: float = 0.0,
+	run_streak: int = 0
+) -> Array:
+	var out: Array = []
+	var use_frac := ap_frac > 0.0
+	if budget_ap <= 0:
+		return out
+	if not use_frac and step_ap <= 0:
+		return out
+	var max_steps: int
+	if use_frac:
+		# Odd/even run: roughly 2 hexes per AP remaining, plus streak slack.
+		max_steps = maxi(1, budget_ap * 2 + 1)
+	else:
+		max_steps = maxi(1, budget_ap / step_ap)
+	var steps_at: Dictionary = {}
+	var start_key := ZZLos.wall_key(from.x, from.y)
+	steps_at[start_key] = 0
+	var queue: Array = [from]
+	var qi := 0
+	while qi < queue.size():
+		var cur: Vector2i = queue[qi]
+		qi += 1
+		var cur_key := ZZLos.wall_key(cur.x, cur.y)
+		var cur_steps: int = steps_at[cur_key]
+		if cur_steps >= max_steps:
+			continue
+		for n in ZZLos.hex_neighbors(cur.x, cur.y):
+			if not _in_bounds(n, grid_cols, grid_rows):
+				continue
+			var nk := ZZLos.wall_key(n.x, n.y)
+			if walls.has(nk):
+				continue
+			if blocked.has(nk):
+				continue
+			var next_steps := cur_steps + 1
+			if next_steps > max_steps:
+				continue
+			var next_ap: int
+			if use_frac:
+				next_ap = run_extra_ap(run_streak, next_steps)
+			else:
+				next_ap = next_steps * step_ap
+			if next_ap > budget_ap:
+				continue
+			if steps_at.has(nk) and int(steps_at[nk]) <= next_steps:
+				continue
+			var was_new := not steps_at.has(nk)
+			steps_at[nk] = next_steps
+			if was_new:
+				out.append(n)
+			queue.append(n)
+	return out
 
 
 static func _in_bounds(c: Vector2i, grid_cols: int, grid_rows: int) -> bool:

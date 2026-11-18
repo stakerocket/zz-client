@@ -25,9 +25,12 @@ signal spend_stat_requested(stat: String, delta: int)
 const TAB_LOBBY := 0
 const TAB_BATTLE := 1
 const CHAT_W := 420.0
-const CHAT_H := 150.0
+## Expanded chat matches CharDock height (scene: offset_top −132, bottom −6 → 126).
+const CHAT_H := 126.0
 const CHAT_COLLAPSED_H := 36.0
 const SOCIAL_EDGE := 8.0
+## Same bottom inset as CharDock so tops line up when heights match.
+const CHAT_BOTTOM := 6.0
 const CHAT_FADE_IDLE_SEC := 7.0
 const CHAT_FADE_DUR := 0.45
 
@@ -83,6 +86,7 @@ const ACTION_DIM := Color(1, 1, 1, 0.45)
 @onready var find_btn: Button = $LobbyScreen/FindCenter/FindBtn
 
 var inventory_ui: ZZInventoryUI
+var enemy_dossier: ZZEnemyDossier
 var _lobby_level_opt: OptionButton
 var _lobby_unspent: Label
 var _lobby_profile: Dictionary = {}
@@ -153,6 +157,8 @@ func _ready() -> void:
 	var top_row := char_dock.get_node_or_null("VBox/TopRow") as Control if char_dock != null else null
 	if top_row != null and not top_row.resized.is_connected(_sync_weapon_card_widths):
 		top_row.resized.connect(_sync_weapon_card_widths)
+	if char_dock != null and not char_dock.resized.is_connected(_on_char_dock_resized):
+		char_dock.resized.connect(_on_char_dock_resized)
 	lobby_btn.pressed.connect(func(): return_to_lobby_pressed.emit())
 	chat_send_btn.pressed.connect(_on_chat_send)
 	chat_edit.text_submitted.connect(func(_t): _on_chat_send())
@@ -167,6 +173,7 @@ func _ready() -> void:
 	_setup_posture_tips()
 	_setup_battle_inv_tip()
 	_ensure_inventory_ui()
+	_ensure_enemy_dossier()
 	# Keep social UI above full-screen lobby/battle layers.
 	chat_dock.z_index = 100
 	move_child(chat_dock, get_child_count() - 1)
@@ -177,6 +184,32 @@ func _ready() -> void:
 	_setup_chat_fade_timer()
 	_make_chat_tabs_transparent()
 	show_login()
+
+
+func _ensure_enemy_dossier() -> void:
+	if enemy_dossier != null:
+		return
+	enemy_dossier = ZZEnemyDossier.new()
+	enemy_dossier.name = "EnemyDossier"
+	if battle_hud != null:
+		battle_hud.add_child(enemy_dossier)
+	else:
+		add_child(enemy_dossier)
+
+
+func show_enemy_dossier(pd: Dictionary, canvas_anchor: Vector2, canvas_shooter: Vector2 = Vector2.ZERO) -> void:
+	_ensure_enemy_dossier()
+	var canvas_size := Vector2(1280, 720)
+	if battle_hud != null:
+		var r := battle_hud.get_global_rect()
+		if r.size.x > 1.0 and r.size.y > 1.0:
+			canvas_size = r.size
+	enemy_dossier.show_dossier(pd, canvas_anchor, canvas_size, canvas_shooter)
+
+
+func hide_enemy_dossier() -> void:
+	if enemy_dossier != null:
+		enemy_dossier.hide_dossier()
 
 
 func _ensure_inventory_ui() -> void:
@@ -314,6 +347,7 @@ func show_lobby() -> void:
 	lobby_screen.visible = true
 	battle_hud.visible = false
 	result_overlay.visible = false
+	hide_enemy_dossier()
 	hide_inventory()
 	lobby_nick.text = player_nick
 	refresh_lobby_stats_from_rules()
@@ -334,11 +368,14 @@ func show_battle() -> void:
 		battle_chat_log.clear()
 	_apply_social_context(true)
 	call_deferred("_sync_weapon_card_widths")
+	## CharDock size is ready next frame — match expanded chat height to it.
+	call_deferred("_apply_chat_dock_height", true)
 
 
 func show_battle_result(won: bool) -> void:
 	battle_hud.visible = true
 	result_overlay.visible = true
+	hide_enemy_dossier()
 	result_label.text = "Победа" if won else "Поражение"
 	end_btn.disabled = true
 	lobby_btn.grab_focus()
@@ -1285,19 +1322,49 @@ func _layout_social() -> void:
 	chat_dock.anchor_bottom = 1.0
 	chat_dock.offset_left = SOCIAL_EDGE
 	chat_dock.offset_right = SOCIAL_EDGE + CHAT_W
-	chat_dock.offset_bottom = -SOCIAL_EDGE
+	chat_dock.offset_bottom = -CHAT_BOTTOM
 	chat_dock.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	_reveal_chat_history()
 
 
+func _on_char_dock_resized() -> void:
+	if _chat_history_visible:
+		_apply_chat_dock_height(true)
+
+
+func _char_dock_height() -> float:
+	if char_dock != null:
+		var h := char_dock.get_global_rect().size.y
+		if h < 1.0:
+			h = char_dock.size.y
+		if h < 1.0:
+			h = char_dock.get_combined_minimum_size().y
+		if h > 1.0:
+			return h
+	return CHAT_H
+
+
 func _apply_chat_dock_height(expanded: bool) -> void:
-	# Keep full height so the embedded players list stays usable.
-	var h := CHAT_H if expanded else CHAT_COLLAPSED_H
+	# Expanded height = CharDock (action panel); collapsed keeps a thin strip.
+	var h := _char_dock_height() if expanded else CHAT_COLLAPSED_H
+	var w := CHAT_W if expanded else CHAT_W - 110.0
 	if players_col != null:
 		players_col.visible = expanded
-	chat_dock.custom_minimum_size = Vector2(CHAT_W if expanded else CHAT_W - 110.0, h)
-	chat_dock.offset_top = -(SOCIAL_EDGE + h)
-	chat_dock.offset_bottom = -SOCIAL_EDGE
+	## Scene logs had min height 88 — that forced the dock taller than CharDock.
+	if lobby_chat_log != null:
+		lobby_chat_log.custom_minimum_size = Vector2(0, 0)
+		lobby_chat_log.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	if battle_chat_log != null:
+		battle_chat_log.custom_minimum_size = Vector2(0, 0)
+		battle_chat_log.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	chat_dock.clip_contents = true
+	chat_dock.custom_minimum_size = Vector2(w, h)
+	## Cap growth: min alone loses to child mins; pin size + offsets.
+	chat_dock.size = Vector2(w, h)
+	chat_dock.offset_left = SOCIAL_EDGE
+	chat_dock.offset_right = SOCIAL_EDGE + w
+	chat_dock.offset_top = -(CHAT_BOTTOM + h)
+	chat_dock.offset_bottom = -CHAT_BOTTOM
 
 
 func _reveal_chat_history() -> void:

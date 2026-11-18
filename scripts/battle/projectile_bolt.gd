@@ -1,20 +1,15 @@
-extends Node3D
+extends Node2D
 class_name ZZProjectileBolt
 
 var tint: Color = Color(1, 0.85, 0.35)
 
 
 func _ready() -> void:
-	var mesh := SphereMesh.new()
-	mesh.radius = 0.12
-	mesh.height = 0.24
-	var mi := MeshInstance3D.new()
-	mi.mesh = mesh
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = tint
-	mat.emission_enabled = true
-	mat.emission = tint
-	mat.emission_energy_multiplier = 1.8
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mi.material_override = mat
-	add_child(mi)
+	var spr := Sprite2D.new()
+	var img := Image.create(8, 8, false, Image.FORMAT_RGBA8)
+	img.fill(tint)
+	spr.texture = ImageTexture.create_from_image(img)
+	spr.centered = true
+	spr.scale = Vector2(1.5, 1.5)
+	spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	add_child(spr)

@@ -1,156 +1,136 @@
-extends Node3D
+extends Node2D
 class_name ZZGridView
 
-## Rectangular hex map: offset col/row (x/y), pointy-top odd-r — same as server.
-## Size comes from server (`state.grid_w` / `grid_h`); defaults match server constants.
-## World plane is XZ (y = up).
-static var GRID_COLS := 40 # X / width
-static var GRID_ROWS := 30 # Y / height
-const HEX_SIZE := 0.5 # center → vertex; ~1 m vertex-to-vertex across
-const HEX_THICK := 0.08 # only for unit/path pads (no full-map grid)
+## 2D pointy-top odd-r hex map (same coords as server). Screen Y foreshortened ~2:1.
+
+static var GRID_COLS := 60
+static var GRID_ROWS := 45
+## Pixel spacing: width between flat centers; row pitch ≈ half for iso feel.
+const HEX_W := 56.0
+const HEX_ROW := 28.0
+const TILE_W := 56
+const TILE_H := 32
 
 signal tile_clicked(grid_pos: Vector2i)
 signal tile_hovered(grid_pos: Vector2i)
 
 var _highlight: Vector2i = Vector2i(-1, -1)
-var _walls: Dictionary = {} # "x,y" -> kind string
-var _path_cells: Array = [] # Vector2i including start
+var _walls: Dictionary = {}
+var _path_cells: Array = []
 var _path_ap: int = 0
 var _path_affordable_ap: int = 0
 var _path_affordable_steps: int = 0
+var _reach_cells: Array = []
+var _range_cells: Array = []
 var _hover_cell: Vector2i = Vector2i(-1, -1)
 var _last_hover_emit: Vector2i = Vector2i(-999, -999)
 var _aim_from: Vector2i = Vector2i(-1, -1)
 var _aim_to: Vector2i = Vector2i(-1, -1)
 var _aim_weapon_range: int = 0
-
-var _floor_mm: MultiMeshInstance3D
-var _overlay_mm: MultiMeshInstance3D
-var _walls_root: Node3D
-var _ground: MeshInstance3D
-var _aim_mesh: MeshInstance3D
-var _path_label: Label3D
-var _mat_path_ok: StandardMaterial3D
-var _mat_path_over: StandardMaterial3D
-var _mat_hl: StandardMaterial3D
-var _mat_own_outline: StandardMaterial3D
-var _mat_enemy_outline: StandardMaterial3D
-var _mat_ground: StandardMaterial3D
-var _hex_mesh: ArrayMesh
-var _hex_overlay_mesh: ArrayMesh
-var _hex_outline_mesh: ArrayMesh
-var _built := false
 var _own_cell: Vector2i = Vector2i(-1, -1)
-var _enemy_cells: Array = [] # Vector2i
-var _outlines_root: Node3D
-## Optional: screen → unit hex (so aim works on torso/head, not only feet).
+var _enemy_cells: Array = []
 var unit_cell_pick: Callable
+
+var _floor: Node2D
+var _overlay: Node2D
+var _outlines: Node2D
+var _walls_root: Node2D
+var _aim_line: Line2D
+var _path_label: Label
+var _tex_tiles: Array = [] ## ImageTexture variants
+var _tex_wash_reach: ImageTexture
+var _tex_wash_range: ImageTexture
+var _tex_wash_path: ImageTexture
+var _tex_wash_hl: ImageTexture
+var _tex_own: ImageTexture
+var _tex_enemy: ImageTexture
+var _tex_sand: ImageTexture
+var _tex_barrier: ImageTexture
+var _tex_ruin: ImageTexture
+var _tile_depth := 0
+var _built := false
 
 
 func _ready() -> void:
-	_build_materials()
-	# ~1.0 = tiles touch; smaller values were leaving wide dirt "frames".
-	_hex_mesh = _make_hex_prism(HEX_SIZE * 0.96, HEX_THICK)
-	_hex_overlay_mesh = _make_hex_prism(HEX_SIZE * 0.94, HEX_THICK)
-	_hex_outline_mesh = _make_hex_outline_mesh(HEX_SIZE * 0.98)
-	_ground = MeshInstance3D.new()
-	_ground.name = "DirtBed"
-	add_child(_ground)
-	# Full hex grid disabled — pads only under units / path preview.
-	_floor_mm = MultiMeshInstance3D.new()
-	_floor_mm.name = "Floor"
-	_floor_mm.visible = false
-	add_child(_floor_mm)
-	_overlay_mm = MultiMeshInstance3D.new()
-	_overlay_mm.name = "Overlay"
-	add_child(_overlay_mm)
-	_outlines_root = Node3D.new()
-	_outlines_root.name = "UnitOutlines"
-	add_child(_outlines_root)
-	_walls_root = Node3D.new()
+	_tile_depth = ZZPixelArt.hex_tile_depth()
+	_tex_tiles = [
+		ZZPixelArt.hex_tile_variant("dirt", 1, TILE_W, TILE_H),
+		ZZPixelArt.hex_tile_variant("dirt", 2, TILE_W, TILE_H),
+		ZZPixelArt.hex_tile_variant("cracked", 3, TILE_W, TILE_H),
+		ZZPixelArt.hex_tile_variant("cracked", 4, TILE_W, TILE_H),
+		ZZPixelArt.hex_tile_variant("grass", 5, TILE_W, TILE_H),
+		ZZPixelArt.hex_tile_variant("grass", 6, TILE_W, TILE_H),
+		ZZPixelArt.hex_tile_variant("rubble", 7, TILE_W, TILE_H),
+		ZZPixelArt.hex_tile_variant("scorched", 8, TILE_W, TILE_H),
+	]
+	_tex_wash_reach = ZZPixelArt.hex_wash(TILE_W, TILE_H, Color(0.55, 0.78, 0.42, 0.28))
+	_tex_wash_range = ZZPixelArt.hex_wash(TILE_W, TILE_H, Color(0.85, 0.45, 0.38, 0.30))
+	_tex_wash_path = ZZPixelArt.hex_wash(TILE_W, TILE_H, Color(0.55, 0.82, 0.45, 0.45))
+	_tex_wash_hl = ZZPixelArt.hex_wash(TILE_W, TILE_H, Color(0.70, 0.90, 0.50, 0.50))
+	_tex_own = ZZPixelArt.hex_outline(TILE_W, TILE_H, Color(0.35, 0.85, 1.0))
+	_tex_enemy = ZZPixelArt.hex_outline(TILE_W, TILE_H, Color(0.95, 0.30, 0.25))
+	_tex_sand = ZZPixelArt.cover_full() ## full cover — ruined wall + rebar
+	_tex_barrier = ZZPixelArt.cover_half() ## half — concrete blocks
+	_tex_ruin = ZZPixelArt.cover_window() ## window — broken wall + grate
+
+	_floor = Node2D.new()
+	_floor.name = "Floor"
+	_floor.z_index = 0
+	add_child(_floor)
+	_overlay = Node2D.new()
+	_overlay.name = "Overlay"
+	_overlay.z_index = 1
+	add_child(_overlay)
+	_walls_root = Node2D.new()
 	_walls_root.name = "Walls"
+	_walls_root.z_index = 2
 	add_child(_walls_root)
-	_aim_mesh = MeshInstance3D.new()
-	_aim_mesh.name = "AimRay"
-	add_child(_aim_mesh)
-	_path_label = Label3D.new()
-	_path_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	_path_label.font_size = 48
-	_path_label.outline_size = 8
-	_path_label.position = Vector3(0, 1.2, 0)
+	_outlines = Node2D.new()
+	_outlines.name = "UnitOutlines"
+	_outlines.z_index = 3
+	add_child(_outlines)
+	_aim_line = Line2D.new()
+	_aim_line.width = 2.0
+	_aim_line.default_color = Color(0.35, 0.9, 0.45, 0.9)
+	_aim_line.z_index = 4
+	add_child(_aim_line)
+	_path_label = Label.new()
+	_path_label.add_theme_font_size_override("font_size", 14)
+	_path_label.add_theme_color_override("font_color", Color(0.75, 0.92, 0.70))
+	_path_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	_path_label.add_theme_constant_override("outline_size", 4)
+	_path_label.z_index = 5
 	_path_label.visible = false
 	add_child(_path_label)
 	_rebuild_floor()
 	_built = true
 
 
-func grid_to_world(col: int, row: int) -> Vector3:
-	var x := HEX_SIZE * sqrt(3.0) * (float(col) + 0.5 * float(row & 1))
-	var z := HEX_SIZE * 1.5 * float(row)
-	# Units / props sit on the slab top.
-	return Vector3(x, HEX_THICK, z)
+func grid_to_world(col: int, row: int) -> Vector2:
+	var x := HEX_W * (float(col) + 0.5 * float(row & 1))
+	var y := HEX_ROW * float(row)
+	return Vector2(x, y)
 
 
-func world_to_grid(world: Vector3) -> Vector2i:
-	var flat := Vector2(world.x, world.z)
-	var q := (sqrt(3.0) / 3.0 * flat.x - 1.0 / 3.0 * flat.y) / HEX_SIZE
-	var r := (2.0 / 3.0 * flat.y) / HEX_SIZE
-	var axial := _axial_round(q, r)
-	var approx := _axial_to_offset(axial.x, axial.y)
-	# Clamp first, then nearest among seed + 2 rings so border outer halves
-	# still resolve to a real edge hex under the oblique camera.
+func world_to_grid(world: Vector2) -> Vector2i:
+	var approx_row := int(round(world.y / HEX_ROW))
+	var approx_col := int(round((world.x / HEX_W) - 0.5 * float(approx_row & 1)))
 	var seed := Vector2i(
-		clampi(approx.x, 0, GRID_COLS - 1),
-		clampi(approx.y, 0, GRID_ROWS - 1)
+		clampi(approx_col, 0, GRID_COLS - 1),
+		clampi(approx_row, 0, GRID_ROWS - 1)
 	)
 	var best := seed
-	var best_d := _flat_dist_sq(grid_to_world(seed.x, seed.y), world)
-	var seen: Dictionary = {ZZLos.wall_key(seed.x, seed.y): true}
-	var ring: Array = [seed]
-	for _depth in 2:
-		var next_ring: Array = []
-		for cell in ring:
-			var c: Vector2i = cell
-			for d in ZZLos.NEIGHBOR_DIRS[c.y & 1]:
-				var n: Vector2i = c + d
-				if not in_bounds(n):
-					continue
-				var nk := ZZLos.wall_key(n.x, n.y)
-				if seen.has(nk):
-					continue
-				seen[nk] = true
-				next_ring.append(n)
-				var dd := _flat_dist_sq(grid_to_world(n.x, n.y), world)
-				if dd < best_d:
-					best_d = dd
-					best = n
-		ring = next_ring
+	var best_d := grid_to_world(seed.x, seed.y).distance_squared_to(world)
+	for dy in range(-2, 3):
+		for dx in range(-2, 3):
+			var n := Vector2i(seed.x + dx, seed.y + dy)
+			if not in_bounds(n):
+				continue
+			var dd := grid_to_world(n.x, n.y).distance_squared_to(world)
+			if dd < best_d:
+				best_d = dd
+				best = n
 	return best
-
-
-func map_xz_bounds() -> Rect2:
-	## Inclusive XZ bounds covering border hex vertices (for camera + picking).
-	var min_x := INF
-	var max_x := -INF
-	var min_z := INF
-	var max_z := -INF
-	for c in [
-		grid_to_world(0, 0),
-		grid_to_world(GRID_COLS - 1, 0),
-		grid_to_world(0, GRID_ROWS - 1),
-		grid_to_world(GRID_COLS - 1, GRID_ROWS - 1),
-		grid_to_world(0, 1),
-		grid_to_world(GRID_COLS - 1, 1),
-	]:
-		min_x = minf(min_x, c.x)
-		max_x = maxf(max_x, c.x)
-		min_z = minf(min_z, c.z)
-		max_z = maxf(max_z, c.z)
-	var pad := HEX_SIZE
-	return Rect2(
-		Vector2(min_x - pad, min_z - pad),
-		Vector2((max_x - min_x) + pad * 2.0, (max_z - min_z) + pad * 2.0)
-	)
 
 
 static func in_bounds(c: Vector2i) -> bool:
@@ -158,49 +138,30 @@ static func in_bounds(c: Vector2i) -> bool:
 
 
 func set_map_size(cols: int, rows: int) -> void:
-	## Authoritative size from server battle state (`grid_w` / `grid_h`).
 	var c := maxi(1, cols)
 	var r := maxi(1, rows)
-	if c == GRID_COLS and r == GRID_ROWS and _ground != null and _ground.mesh != null:
+	if c == GRID_COLS and r == GRID_ROWS and _built:
 		return
 	GRID_COLS = c
 	GRID_ROWS = r
-	_rebuild_ground_bed()
+	_rebuild_floor()
+	_rebuild_walls()
 
 
-func map_center() -> Vector3:
+func map_center() -> Vector2:
+	return (grid_to_world(0, 0) + grid_to_world(GRID_COLS - 1, GRID_ROWS - 1)) * 0.5
+
+
+func map_extents() -> Vector2:
+	## Half-size of map AABB in screen px.
 	var a := grid_to_world(0, 0)
 	var b := grid_to_world(GRID_COLS - 1, GRID_ROWS - 1)
-	return (a + b) * 0.5
+	return Vector2(absf(b.x - a.x) * 0.5 + HEX_W, absf(b.y - a.y) * 0.5 + HEX_ROW)
 
 
-func map_extents() -> Vector3:
-	## Half-size of map AABB on XZ (y unused).
-	var half := Vector3.ZERO
-	var min_x := INF
-	var max_x := -INF
-	var min_z := INF
-	var max_z := -INF
-	for c in [
-		grid_to_world(0, 0),
-		grid_to_world(GRID_COLS - 1, 0),
-		grid_to_world(0, GRID_ROWS - 1),
-		grid_to_world(GRID_COLS - 1, GRID_ROWS - 1),
-	]:
-		min_x = minf(min_x, c.x)
-		max_x = maxf(max_x, c.x)
-		min_z = minf(min_z, c.z)
-		max_z = maxf(max_z, c.z)
-	# Pad past border hex vertices so oblique edge clicks still hit.
-	half.x = (max_x - min_x) * 0.5 + HEX_SIZE * 1.5
-	half.z = (max_z - min_z) * 0.5 + HEX_SIZE * 1.5
-	return half
-
-
-## Kept for callers that used 2D map size; returns (width, depth) on XZ.
 func map_pixel_size() -> Vector2:
 	var e := map_extents()
-	return Vector2(e.x * 2.0, e.z * 2.0)
+	return e * 2.0
 
 
 func is_hex_neighbor(a: Vector2i, b: Vector2i) -> bool:
@@ -231,10 +192,7 @@ func set_path_preview(cells: Array, ap_cost: int, affordable_steps: int = -1, af
 		_path_affordable_steps = maxi(0, _path_cells.size() - 1)
 	else:
 		_path_affordable_steps = clampi(affordable_steps, 0, maxi(0, _path_cells.size() - 1))
-	if affordable_ap < 0:
-		_path_affordable_ap = ap_cost
-	else:
-		_path_affordable_ap = affordable_ap
+	_path_affordable_ap = ap_cost if affordable_ap < 0 else affordable_ap
 	_rebuild_overlay()
 	_update_path_label()
 
@@ -250,6 +208,30 @@ func clear_path_preview() -> void:
 	_update_path_label()
 
 
+func set_reach_preview(cells: Array) -> void:
+	_reach_cells = cells.duplicate()
+	_rebuild_overlay()
+
+
+func clear_reach_preview() -> void:
+	if _reach_cells.is_empty():
+		return
+	_reach_cells.clear()
+	_rebuild_overlay()
+
+
+func set_range_preview(cells: Array) -> void:
+	_range_cells = cells.duplicate()
+	_rebuild_overlay()
+
+
+func clear_range_preview() -> void:
+	if _range_cells.is_empty():
+		return
+	_range_cells.clear()
+	_rebuild_overlay()
+
+
 func set_aim_ray(from: Vector2i, to: Vector2i, weapon_range: int) -> void:
 	_aim_from = from
 	_aim_to = to
@@ -258,8 +240,6 @@ func set_aim_ray(from: Vector2i, to: Vector2i, weapon_range: int) -> void:
 
 
 func clear_aim_ray() -> void:
-	if _aim_from.x < 0 and _aim_to.x < 0:
-		return
 	_aim_from = Vector2i(-1, -1)
 	_aim_to = Vector2i(-1, -1)
 	_aim_weapon_range = 0
@@ -296,293 +276,115 @@ func walls_dict() -> Dictionary:
 	return _walls
 
 
-func screen_to_ground(screen_pos: Vector2) -> Vector3:
-	var cam := get_viewport().get_camera_3d()
-	if cam == null:
-		return Vector3.ZERO
-	var from := cam.project_ray_origin(screen_pos)
-	var dir := cam.project_ray_normal(screen_pos)
-	# Intersect slab top plane so picking matches unit feet.
-	var plane_y := HEX_THICK
-	if absf(dir.y) < 0.0001:
-		return Vector3(from.x, plane_y, from.z)
-	var t := (plane_y - from.y) / dir.y
-	if t < 0.0:
-		return Vector3.ZERO
-	return from + dir * t
+func screen_to_ground(screen_pos: Vector2) -> Vector2:
+	## screen_pos is viewport coords; convert via canvas transform of this node.
+	return get_global_transform_with_canvas().affine_inverse() * screen_pos
 
 
-func _flat_dist_sq(a: Vector3, b: Vector3) -> float:
-	var dx := a.x - b.x
-	var dz := a.z - b.z
-	return dx * dx + dz * dz
-
-
-func _axial_to_offset(q: int, r: int) -> Vector2i:
-	return ZZLos.axial_to_offset(q, r)
-
-
-func _axial_round(fq: float, fr: float) -> Vector2i:
-	var fx := fq
-	var fz := fr
-	var fy := -fx - fz
-	var rx := int(round(fx))
-	var ry := int(round(fy))
-	var rz := int(round(fz))
-	var x_diff := absf(float(rx) - fx)
-	var y_diff := absf(float(ry) - fy)
-	var z_diff := absf(float(rz) - fz)
-	if x_diff > y_diff and x_diff > z_diff:
-		rx = -ry - rz
-	elif y_diff > z_diff:
-		ry = -rx - rz
+func _tile_for_cell(col: int, row: int) -> Texture2D:
+	if _tex_tiles.is_empty():
+		return null
+	## Weighted mix: mostly dirt/cracked, some grass/rubble, rare scorched.
+	var h: int = absi((col * 73856093) ^ (row * 19349663) ^ ((col + row) * 83492791))
+	var bucket: int = h % 100
+	var idx: int = 0
+	if bucket < 28:
+		idx = 0
+	elif bucket < 48:
+		idx = 1
+	elif bucket < 66:
+		idx = 2
+	elif bucket < 80:
+		idx = 3
+	elif bucket < 90:
+		idx = 4
+	elif bucket < 96:
+		idx = 5
+	elif bucket < 99:
+		idx = 6
 	else:
-		rz = -rx - ry
-	return Vector2i(rx, rz)
+		idx = 7
+	return _tex_tiles[idx] as Texture2D
 
 
-func _build_materials() -> void:
-	_mat_ground = _make_mat(Color(0.18, 0.16, 0.14, 1.0))
-	_mat_ground.roughness = 1.0
-	_mat_path_ok = _make_mat(Color(0.45, 0.72, 0.42, 0.78), true)
-	_mat_path_over = _make_mat(Color(0.50, 0.48, 0.45, 0.7), true)
-	_mat_hl = _make_mat(Color(0.55, 0.78, 0.40, 0.82), true)
-	_mat_own_outline = _make_line_mat(Color(0.35, 0.78, 1.0, 1.0))
-	_mat_enemy_outline = _make_line_mat(Color(0.95, 0.28, 0.22, 1.0))
+func _rebuild_floor() -> void:
+	if _floor == null:
+		return
+	for c in _floor.get_children():
+		c.queue_free()
+	var y_fix := float(_tile_depth) * 0.5
+	for row in GRID_ROWS:
+		for col in GRID_COLS:
+			var spr := Sprite2D.new()
+			spr.texture = _tile_for_cell(col, row)
+			spr.centered = true
+			## Face center stays on grid point; slab thickness hangs below.
+			spr.position = grid_to_world(col, row) + Vector2(0.0, y_fix)
+			spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+			_floor.add_child(spr)
 
 
-func _make_mat(col: Color, transparent: bool = false) -> StandardMaterial3D:
-	var m := StandardMaterial3D.new()
-	m.albedo_color = col
-	m.roughness = 0.88
-	m.metallic = 0.0
-	if transparent:
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		m.cull_mode = BaseMaterial3D.CULL_DISABLED
-	return m
+func _rebuild_overlay() -> void:
+	if _overlay == null:
+		return
+	for c in _overlay.get_children():
+		c.queue_free()
+	var path_keys: Dictionary = {}
+	for i in range(_path_cells.size()):
+		if i > 0 and i > _path_affordable_steps:
+			break
+		var pc: Vector2i = _path_cells[i]
+		path_keys[ZZLos.wall_key(pc.x, pc.y)] = true
+	if not _range_cells.is_empty():
+		for fc in _range_cells:
+			if path_keys.has(ZZLos.wall_key(fc.x, fc.y)):
+				continue
+			_spawn_wash(fc, _tex_wash_range)
+	else:
+		for rc in _reach_cells:
+			if path_keys.has(ZZLos.wall_key(rc.x, rc.y)):
+				continue
+			_spawn_wash(rc, _tex_wash_reach)
+	for i in range(_path_cells.size()):
+		if i > 0 and i > _path_affordable_steps:
+			break
+		_spawn_wash(_path_cells[i], _tex_wash_path)
+	if _highlight.x >= 0:
+		_spawn_wash(_highlight, _tex_wash_hl)
 
 
-func _make_line_mat(col: Color) -> StandardMaterial3D:
-	var m := StandardMaterial3D.new()
-	m.albedo_color = col
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.render_priority = 1
-	return m
-
-
-func _hex_ring(size: float, y: float) -> Array[Vector3]:
-	var pts: Array[Vector3] = []
-	for i in 6:
-		var angle := deg_to_rad(-30.0 + 60.0 * float(i))
-		pts.append(Vector3(cos(angle) * size, y, sin(angle) * size))
-	return pts
-
-
-func _make_hex_top(size: float, y: float) -> ArrayMesh:
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var pts := _hex_ring(size, y)
-	var center := Vector3(0, y, 0)
-	var n := Vector3.UP
-	for i in 6:
-		var j := (i + 1) % 6
-		st.set_normal(n)
-		st.add_vertex(center)
-		st.set_normal(n)
-		st.add_vertex(pts[i])
-		st.set_normal(n)
-		st.add_vertex(pts[j])
-	st.generate_normals()
-	return st.commit()
-
-
-func _make_hex_prism(size: float, thick: float) -> ArrayMesh:
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var top := _hex_ring(size, thick)
-	var bot := _hex_ring(size, 0.0)
-	var center_top := Vector3(0, thick, 0)
-	# Top cap.
-	for i in 6:
-		var j := (i + 1) % 6
-		st.set_normal(Vector3.UP)
-		st.add_vertex(center_top)
-		st.set_normal(Vector3.UP)
-		st.add_vertex(top[i])
-		st.set_normal(Vector3.UP)
-		st.add_vertex(top[j])
-	# Side walls (outward).
-	for i in 6:
-		var j := (i + 1) % 6
-		var edge := top[j] - top[i]
-		var outward := Vector3(edge.z, 0.0, -edge.x).normalized()
-		if outward.length_squared() < 0.001:
-			outward = Vector3.RIGHT
-		st.set_normal(outward)
-		st.add_vertex(bot[i])
-		st.set_normal(outward)
-		st.add_vertex(bot[j])
-		st.set_normal(outward)
-		st.add_vertex(top[j])
-		st.set_normal(outward)
-		st.add_vertex(bot[i])
-		st.set_normal(outward)
-		st.add_vertex(top[j])
-		st.set_normal(outward)
-		st.add_vertex(top[i])
-	st.generate_normals()
-	return st.commit()
-
-
-func _make_hex_outline_mesh(size: float) -> ArrayMesh:
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var y := 0.04
-	var inner := size * 0.86
-	var outer := size
-	var n := Vector3.UP
-	var outer_pts := _hex_ring(outer, y)
-	var inner_pts := _hex_ring(inner, y)
-	for i in 6:
-		var j := (i + 1) % 6
-		st.set_normal(n)
-		st.add_vertex(inner_pts[i])
-		st.set_normal(n)
-		st.add_vertex(outer_pts[i])
-		st.set_normal(n)
-		st.add_vertex(outer_pts[j])
-		st.set_normal(n)
-		st.add_vertex(inner_pts[i])
-		st.set_normal(n)
-		st.add_vertex(outer_pts[j])
-		st.set_normal(n)
-		st.add_vertex(inner_pts[j])
-	return st.commit()
+func _spawn_wash(pc: Vector2i, tex: Texture2D) -> void:
+	var spr := Sprite2D.new()
+	spr.texture = tex
+	spr.centered = true
+	spr.position = grid_to_world(pc.x, pc.y)
+	spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_overlay.add_child(spr)
 
 
 func _rebuild_unit_outlines() -> void:
-	if _outlines_root == null:
+	if _outlines == null:
 		return
-	for c in _outlines_root.get_children():
+	for c in _outlines.get_children():
 		c.queue_free()
 	if _own_cell.x >= 0:
-		_spawn_unit_pad(_own_cell, _mat_own_outline)
+		_spawn_outline(_own_cell, _tex_own)
 	for e in _enemy_cells:
 		if typeof(e) != TYPE_VECTOR2I:
 			continue
 		var cell: Vector2i = e
-		if cell.x < 0:
+		if cell.x < 0 or cell == _own_cell:
 			continue
-		if cell == _own_cell:
-			continue
-		_spawn_unit_pad(cell, _mat_enemy_outline)
+		_spawn_outline(cell, _tex_enemy)
 
 
-func _spawn_unit_pad(pc: Vector2i, outline_mat: StandardMaterial3D) -> void:
-	# Outline only — do not tint/fill the hex under the unit.
-	var ring := MeshInstance3D.new()
-	ring.mesh = _hex_outline_mesh
-	ring.material_override = outline_mat
-	ring.position = grid_to_world(pc.x, pc.y) + Vector3(0, 0.02, 0)
-	_outlines_root.add_child(ring)
-
-
-func _rebuild_ground_bed() -> void:
-	if _ground == null:
-		return
-	var center := map_center()
-	var ext := map_extents()
-	var plane := PlaneMesh.new()
-	# Плотно к полю: под чатом чёрный/серый void, не коричневый пол под UI.
-	plane.size = Vector2(ext.x * 2.02, ext.z * 2.02)
-	_ground.mesh = plane
-	_ground.material_override = _mat_ground
-	_ground.position = Vector3(center.x, 0.0, center.z)
-
-
-func _rebuild_floor() -> void:
-	# No full-map hex grid — continuous ground only.
-	_rebuild_ground_bed()
-	if _floor_mm != null:
-		_floor_mm.multimesh = null
-		_floor_mm.visible = false
-
-
-func _rebuild_overlay() -> void:
-	if _overlay_mm == null:
-		return
-	# Clear previous overlay children (colored hex instances).
-	for c in _overlay_mm.get_children():
-		c.queue_free()
-	_overlay_mm.multimesh = null
-	var path_keys: Dictionary = {}
-	for i in range(_path_cells.size()):
-		var pc: Vector2i = _path_cells[i]
-		var affordable := i == 0 or i <= _path_affordable_steps
-		path_keys[ZZLos.wall_key(pc.x, pc.y)] = true
-		_spawn_overlay_hex(pc, _mat_path_ok if affordable else _mat_path_over)
-	if _highlight.x >= 0 and not path_keys.has(ZZLos.wall_key(_highlight.x, _highlight.y)):
-		_spawn_overlay_hex(_highlight, _mat_hl)
-
-
-func _spawn_overlay_hex(pc: Vector2i, mat: StandardMaterial3D) -> void:
-	var mi := MeshInstance3D.new()
-	mi.mesh = _hex_overlay_mesh
-	mi.material_override = mat
-	# Sit on ground; path pads are the only grid visible while planning.
-	var c := grid_to_world(pc.x, pc.y)
-	mi.position = Vector3(c.x, 0.0, c.z)
-	_overlay_mm.add_child(mi)
-
-
-func _update_path_label() -> void:
-	if _path_label == null:
-		return
-	if _path_cells.is_empty():
-		_path_label.visible = false
-		return
-	var end: Vector2i = _path_cells[_path_cells.size() - 1]
-	var c := grid_to_world(end.x, end.y)
-	_path_label.position = c + Vector3(0, 1.6, 0)
-	if _path_affordable_ap < _path_ap:
-		_path_label.text = "%d / %d ОД" % [_path_affordable_ap, _path_ap]
-		_path_label.modulate = Color(0.75, 0.78, 0.82)
-	else:
-		_path_label.text = "%d ОД" % _path_ap
-		_path_label.modulate = Color(0.45, 0.95, 0.55)
-	_path_label.visible = true
-
-
-func _rebuild_aim() -> void:
-	if _aim_mesh == null:
-		return
-	if _aim_from.x < 0 or _aim_to.x < 0 or _aim_from == _aim_to:
-		_aim_mesh.mesh = null
-		return
-	var from_w := grid_to_world(_aim_from.x, _aim_from.y) + Vector3(0, 1.35, 0)
-	var to_w := grid_to_world(_aim_to.x, _aim_to.y) + Vector3(0, 1.35, 0)
-	var hex_dist := ZZLos.hex_distance(_aim_from.x, _aim_from.y, _aim_to.x, _aim_to.y)
-	var mid_w := to_w
-	var use_split := false
-	if _aim_weapon_range > 0 and hex_dist > _aim_weapon_range:
-		var t := float(_aim_weapon_range) / float(hex_dist)
-		mid_w = from_w.lerp(to_w, t)
-		use_split = true
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_LINES)
-	st.set_color(Color(0.35, 0.9, 0.45, 0.95))
-	st.add_vertex(from_w)
-	st.add_vertex(mid_w if use_split else to_w)
-	if use_split:
-		st.set_color(Color(0.62, 0.64, 0.68, 0.85))
-		st.add_vertex(mid_w)
-		st.add_vertex(to_w)
-	_aim_mesh.mesh = st.commit()
-	var mat := StandardMaterial3D.new()
-	mat.vertex_color_use_as_albedo = true
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_aim_mesh.material_override = mat
+func _spawn_outline(pc: Vector2i, tex: Texture2D) -> void:
+	var spr := Sprite2D.new()
+	spr.texture = tex
+	spr.centered = true
+	spr.position = grid_to_world(pc.x, pc.y)
+	spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_outlines.add_child(spr)
 
 
 func _rebuild_walls() -> void:
@@ -597,158 +399,67 @@ func _rebuild_walls() -> void:
 		var x := int(parts[0])
 		var y := int(parts[1])
 		var kind := str(_walls[key])
-		var node := _make_wall_node(kind)
-		node.position = grid_to_world(x, y)
-		_walls_root.add_child(node)
+		var spr := Sprite2D.new()
+		var y_lift := -10.0
+		match kind:
+			"half":
+				spr.texture = _tex_barrier
+				y_lift = -6.0
+			"window":
+				spr.texture = _tex_ruin
+				y_lift = -10.0
+			_:
+				spr.texture = _tex_sand ## full
+				y_lift = -12.0
+		spr.centered = true
+		spr.position = grid_to_world(x, y) + Vector2(0, y_lift)
+		spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		_walls_root.add_child(spr)
 
 
-func _make_cover_noise(seed_v: int, dark: Color, mid: Color, lit: Color) -> ImageTexture:
-	var noise := FastNoiseLite.new()
-	noise.seed = seed_v
-	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
-	noise.frequency = 0.11
-	noise.fractal_type = FastNoiseLite.FRACTAL_FBM
-	noise.fractal_octaves = 4
-	var grad := Gradient.new()
-	grad.offsets = PackedFloat32Array([0.0, 0.45, 1.0])
-	grad.colors = PackedColorArray([dark, mid, lit])
-	const SZ := 64
-	var img := Image.create(SZ, SZ, false, Image.FORMAT_RGBA8)
-	for y in SZ:
-		for x in SZ:
-			var n := (noise.get_noise_2d(float(x), float(y)) + 1.0) * 0.5
-			var grit := (noise.get_noise_2d(float(x) * 2.7 + 8.0, float(y) * 2.7) + 1.0) * 0.5
-			img.set_pixel(x, y, grad.sample(clampf(n * 0.7 + grit * 0.3, 0.0, 1.0)))
-	return ImageTexture.create_from_image(img)
+func _rebuild_aim() -> void:
+	if _aim_line == null:
+		return
+	_aim_line.clear_points()
+	if _aim_from.x < 0 or _aim_to.x < 0 or _aim_from == _aim_to:
+		return
+	var a := grid_to_world(_aim_from.x, _aim_from.y) + Vector2(0, -20)
+	var b := grid_to_world(_aim_to.x, _aim_to.y) + Vector2(0, -20)
+	_aim_line.add_point(a)
+	_aim_line.add_point(b)
 
 
-func _make_cover_mat(tint: Color, seed_v: int, dark: Color, mid: Color, lit: Color) -> StandardMaterial3D:
-	var m := StandardMaterial3D.new()
-	m.albedo_color = tint
-	m.albedo_texture = _make_cover_noise(seed_v, dark, mid, lit)
-	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
-	m.vertex_color_use_as_albedo = true
-	m.roughness = 0.94
-	m.metallic = 0.0
-	m.uv1_scale = Vector3(1.8, 1.8, 1.8)
-	return m
-
-
-func _add_box_face(st: SurfaceTool, verts: Array, normal: Vector3, col: Color, uvs: Array) -> void:
-	# Two triangles: 0-1-2, 0-2-3
-	for idx in [0, 1, 2, 0, 2, 3]:
-		st.set_normal(normal)
-		st.set_color(col)
-		st.set_uv(uvs[idx])
-		st.add_vertex(verts[idx])
-
-
-func _make_faceted_box(size: Vector3) -> ArrayMesh:
-	## Box with darker sides / bottom so edges read under flat lighting.
-	var hx := size.x * 0.5
-	var hy := size.y * 0.5
-	var hz := size.z * 0.5
-	var top_c := Color(1.05, 1.05, 1.02, 1.0)
-	var side_c := Color(0.55, 0.56, 0.54, 1.0)
-	var end_c := Color(0.42, 0.43, 0.41, 1.0)
-	var bot_c := Color(0.28, 0.28, 0.27, 1.0)
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	# Top (+Y)
-	_add_box_face(st, [
-		Vector3(-hx, hy, -hz), Vector3(hx, hy, -hz), Vector3(hx, hy, hz), Vector3(-hx, hy, hz)
-	], Vector3.UP, top_c, [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)])
-	# Bottom (-Y)
-	_add_box_face(st, [
-		Vector3(-hx, -hy, hz), Vector3(hx, -hy, hz), Vector3(hx, -hy, -hz), Vector3(-hx, -hy, -hz)
-	], Vector3.DOWN, bot_c, [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)])
-	# +Z / -Z (long sides)
-	_add_box_face(st, [
-		Vector3(-hx, -hy, hz), Vector3(-hx, hy, hz), Vector3(hx, hy, hz), Vector3(hx, -hy, hz)
-	], Vector3.FORWARD, side_c, [Vector2(0, 1), Vector2(0, 0), Vector2(1, 0), Vector2(1, 1)])
-	_add_box_face(st, [
-		Vector3(hx, -hy, -hz), Vector3(hx, hy, -hz), Vector3(-hx, hy, -hz), Vector3(-hx, -hy, -hz)
-	], Vector3.BACK, side_c, [Vector2(0, 1), Vector2(0, 0), Vector2(1, 0), Vector2(1, 1)])
-	# +X / -X (ends — darkest)
-	_add_box_face(st, [
-		Vector3(hx, -hy, hz), Vector3(hx, hy, hz), Vector3(hx, hy, -hz), Vector3(hx, -hy, -hz)
-	], Vector3.RIGHT, end_c, [Vector2(0, 1), Vector2(0, 0), Vector2(1, 0), Vector2(1, 1)])
-	_add_box_face(st, [
-		Vector3(-hx, -hy, -hz), Vector3(-hx, hy, -hz), Vector3(-hx, hy, hz), Vector3(-hx, -hy, hz)
-	], Vector3.LEFT, end_c, [Vector2(0, 1), Vector2(0, 0), Vector2(1, 0), Vector2(1, 1)])
-	st.generate_normals()
-	return st.commit()
-
-
-func _spawn_cover_box(parent: Node3D, size: Vector3, mat: StandardMaterial3D, pos: Vector3, yaw_deg: float = 0.0) -> void:
-	var mi := MeshInstance3D.new()
-	mi.mesh = _make_faceted_box(size)
-	mi.material_override = mat
-	mi.position = pos
-	mi.rotation_degrees.y = yaw_deg
-	parent.add_child(mi)
-
-
-func _make_wall_node(kind: String) -> Node3D:
-	var root := Node3D.new()
-	match kind:
-		"half":
-			# Sandbags: 2 stacked rows with offset so facets read as volume.
-			var sand := _make_cover_mat(
-				Color(0.92, 0.82, 0.62, 1.0), 71,
-				Color(0.38, 0.30, 0.18), Color(0.58, 0.48, 0.32), Color(0.78, 0.68, 0.48)
-			)
-			_spawn_cover_box(root, Vector3(HEX_SIZE * 1.28, 0.42, HEX_SIZE * 0.72), sand, Vector3(0.02, 0.22, 0.0), 18.0)
-			_spawn_cover_box(root, Vector3(HEX_SIZE * 1.18, 0.40, HEX_SIZE * 0.68), sand, Vector3(-0.04, 0.62, 0.03), -12.0)
-			_spawn_cover_box(root, Vector3(HEX_SIZE * 0.55, 0.38, HEX_SIZE * 0.55), sand, Vector3(0.28, 0.22, 0.18), 40.0)
-		"window":
-			var concrete := _make_cover_mat(
-				Color(0.88, 0.88, 0.86, 1.0), 82,
-				Color(0.28, 0.28, 0.27), Color(0.48, 0.47, 0.45), Color(0.68, 0.67, 0.64)
-			)
-			_spawn_cover_box(root, Vector3(HEX_SIZE * 1.35, 1.05, HEX_SIZE * 0.52), concrete, Vector3(0.0, 0.55, 0.0), 8.0)
-			_spawn_cover_box(root, Vector3(HEX_SIZE * 1.15, 0.95, HEX_SIZE * 0.48), concrete, Vector3(0.06, 1.55, -0.02), -6.0)
-		_:
-			var ruin := _make_cover_mat(
-				Color(0.82, 0.80, 0.76, 1.0), 93,
-				Color(0.18, 0.17, 0.16), Color(0.36, 0.35, 0.33), Color(0.55, 0.53, 0.50)
-			)
-			_spawn_cover_box(root, Vector3(HEX_SIZE * 1.42, 1.55, HEX_SIZE * 0.58), ruin, Vector3(0.0, 0.78, 0.0), 5.0)
-			_spawn_cover_box(root, Vector3(HEX_SIZE * 1.28, 1.45, HEX_SIZE * 0.52), ruin, Vector3(-0.04, 2.2, 0.03), -4.0)
-	return root
+func _update_path_label() -> void:
+	if _path_label == null:
+		return
+	if _path_cells.is_empty():
+		_path_label.visible = false
+		return
+	var end: Vector2i = _path_cells[_path_cells.size() - 1]
+	var c := grid_to_world(end.x, end.y)
+	_path_label.position = c + Vector2(-16, -36)
+	var show_ap := _path_affordable_ap if _path_affordable_ap > 0 else _path_ap
+	_path_label.text = "%d ОД" % show_ap
+	_path_label.visible = show_ap > 0
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not visible:
 		return
-	if event is InputEventMouseMotion:
-		var g := _grid_at_screen((event as InputEventMouseMotion).position)
+	if event is InputEventMouseMotion or event is InputEventMouseButton:
+		var screen := (event as InputEventMouse).position
+		var local := screen_to_ground(screen)
+		var g := world_to_grid(local)
+		if unit_cell_pick.is_valid():
+			var picked: Variant = unit_cell_pick.call(screen)
+			if typeof(picked) == TYPE_VECTOR2I and picked.x >= 0:
+				g = picked
 		if g != _last_hover_emit:
 			_last_hover_emit = g
 			_hover_cell = g
 			tile_hovered.emit(g)
-		return
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		var g := _grid_at_screen((event as InputEventMouseButton).position)
-		if in_bounds(g):
-			tile_clicked.emit(g)
-			get_viewport().set_input_as_handled()
-
-
-func _grid_at_screen(screen_pos: Vector2) -> Vector2i:
-	if unit_cell_pick.is_valid():
-		var ucell: Variant = unit_cell_pick.call(screen_pos)
-		if typeof(ucell) == TYPE_VECTOR2I:
-			var u: Vector2i = ucell
-			if in_bounds(u):
-				return u
-	var ground := screen_to_ground(screen_pos)
-	var g := world_to_grid(ground)
-	if not in_bounds(g):
-		return Vector2i(-1, -1)
-	# Accept anything near a real hex center (incl. outer half of border cells).
-	var c := grid_to_world(g.x, g.y)
-	var max_d := HEX_SIZE * 1.75
-	if _flat_dist_sq(c, ground) > max_d * max_d:
-		return Vector2i(-1, -1)
-	return g
+		if event is InputEventMouseButton:
+			var mb := event as InputEventMouseButton
+			if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+				tile_clicked.emit(g)
+				get_viewport().set_input_as_handled()

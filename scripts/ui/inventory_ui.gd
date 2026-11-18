@@ -57,17 +57,6 @@ const COL_PANEL_BG := Color(0.11, 0.115, 0.125, 1.0)
 const COL_PANEL_BORDER := Color(0.28, 0.31, 0.35, 0.85)
 const COL_BAG_BG := Color(0.055, 0.058, 0.065, 0.98)
 const COL_BAG_BORDER := Color(0.24, 0.26, 0.30, 0.85)
-## Fixed RT + TextureRect (SubViewportContainer.stretch locks size to panel ≈ мыло).
-const PREVIEW_RT := Vector2i(900, 1200)
-const PREVIEW_YAW_SENS := 0.012
-const PREVIEW_PLATFORM_H := 0.14
-const PREVIEW_PLATFORM_SIDE := 1.35
-const PREVIEW_PLATFORM_SIZE := Vector3(PREVIEW_PLATFORM_SIDE, PREVIEW_PLATFORM_H, PREVIEW_PLATFORM_SIDE)
-## Sink feet slightly into pedestal so boots plant on the slab.
-const PREVIEW_UNIT_SINK := 0.06
-## Pedestal+unit vertical placement in frame (world Y).
-const PREVIEW_PIVOT_Y := 0.06
-
 var _nick: String = ""
 var _inventory: Array = []
 var _equipped: Dictionary = {"primary": "", "secondary": "", "armor": ""}
@@ -102,12 +91,9 @@ var _bag_margin: MarginContainer
 var _preview_panel: PanelContainer
 var _preview_host: Control
 var _preview_rect: TextureRect
-var _preview_vp: SubViewport
-var _preview_pivot: Node3D
 var _preview_dragging: bool = false
 var _equip_col: VBoxContainer
 var _quick_box: VBoxContainer
-var _unit: ZZUnitView
 var _locker_enabled: bool = true
 var _locker_col: VBoxContainer
 var _locker_grid: GridContainer
@@ -133,22 +119,12 @@ func open_for(nick: String, locker_enabled: bool = true) -> void:
 	if _nick_label != null:
 		_nick_label.text = nick if nick != "" else "—"
 	visible = true
-	## Rebuild preview so camera/unit tweaks apply every open; yaw resets to 0.
-	_unit = null
-	_preview_pivot = null
 	_preview_dragging = false
-	if _preview_vp != null:
-		for c in _preview_vp.get_children():
-			c.queue_free()
 	_ensure_preview()
-	_reset_preview_yaw()
 	_refresh()
-	## Grid size depends on bag panel layout — rebuild next frame.
 	call_deferred("_fit_shell_to_left")
 	call_deferred("_refresh_grid")
-	## Second pass after shell/bag sizes settle — cells fill without bottom void.
 	call_deferred("_refresh_grid")
-	call_deferred("_bind_preview_texture")
 
 
 func set_locker_enabled(enabled: bool) -> void:
@@ -293,16 +269,6 @@ func _build() -> void:
 	_preview_host.clip_contents = true
 	_preview_host.gui_input.connect(_on_preview_gui_input)
 	_preview_panel.add_child(_preview_host)
-	## Viewport outside SubViewportContainer so size is not forced to panel px.
-	_preview_vp = SubViewport.new()
-	_preview_vp.name = "InvPreviewVP"
-	_preview_vp.own_world_3d = true
-	_preview_vp.transparent_bg = false
-	_preview_vp.handle_input_locally = false
-	_preview_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	_preview_vp.msaa_3d = Viewport.MSAA_8X
-	_preview_vp.size = PREVIEW_RT
-	add_child(_preview_vp)
 	_preview_rect = TextureRect.new()
 	_preview_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_preview_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -310,7 +276,6 @@ func _build() -> void:
 	_preview_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_preview_rect.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	_preview_host.add_child(_preview_rect)
-	call_deferred("_bind_preview_texture")
 
 	## Equip column: armor on top, weapons below (same square slots).
 	_equip_col = VBoxContainer.new()
@@ -541,22 +506,11 @@ func _build() -> void:
 	)
 
 
-func _on_preview_gui_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton:
-		var mb := event as InputEventMouseButton
-		if mb.button_index == MOUSE_BUTTON_LEFT:
-			_preview_dragging = mb.pressed
-			_preview_host.accept_event()
-	elif event is InputEventMouseMotion and _preview_dragging:
-		var mm := event as InputEventMouseMotion
-		if _preview_pivot != null and is_instance_valid(_preview_pivot):
-			_preview_pivot.rotation.y -= mm.relative.x * PREVIEW_YAW_SENS
-		_preview_host.accept_event()
+func _on_preview_gui_input(_event: InputEvent) -> void:
+	pass
 
 
 func _reset_preview_yaw() -> void:
-	if _preview_pivot != null and is_instance_valid(_preview_pivot):
-		_preview_pivot.rotation = Vector3.ZERO
 	_preview_dragging = false
 
 
@@ -812,99 +766,22 @@ func _apply_bag_fixed_size() -> void:
 		_bag_scroll.custom_minimum_size = Vector2(float(g.x), float(g.y))
 
 
-func _bind_preview_texture() -> void:
-	if _preview_rect == null or _preview_vp == null:
-		return
-	_preview_vp.size = PREVIEW_RT
-	_preview_rect.texture = _preview_vp.get_texture()
-
-
 func _ensure_preview() -> void:
-	if _preview_vp == null:
+	if _preview_rect == null:
 		return
-	if _unit != null and is_instance_valid(_unit):
-		return
-	for c in _preview_vp.get_children():
-		c.queue_free()
-	_preview_vp.positional_shadow_atlas_size = 2048
-	var world := Node3D.new()
-	_preview_vp.add_child(world)
-	var env_node := WorldEnvironment.new()
-	var env := Environment.new()
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.035, 0.038, 0.045, 1.0)
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.48, 0.50, 0.56)
-	env.ambient_light_energy = 0.38
-	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	env_node.environment = env
-	world.add_child(env_node)
-	## Studio key: front-high, slight bias (~28°). Side key (~90°) hides half the mesh.
-	## Camera looks −Z from +Z; identity light also −Z = front. Pitch down + small yaw.
-	var key := DirectionalLight3D.new()
-	key.rotation_degrees = Vector3(-42, 28, 0)
-	key.light_color = Color(1.0, 0.97, 0.92)
-	key.light_energy = 1.05
-	key.shadow_enabled = true
-	key.shadow_blur = 1.8
-	key.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
-	world.add_child(key)
-	var fill := DirectionalLight3D.new()
-	fill.rotation_degrees = Vector3(-18, -40, 0)
-	fill.light_color = Color(0.72, 0.78, 0.92)
-	fill.light_energy = 0.48
-	fill.shadow_enabled = false
-	world.add_child(fill)
-	var rim := DirectionalLight3D.new()
-	rim.rotation_degrees = Vector3(-12, 165, 0)
-	rim.light_color = Color(0.95, 0.92, 0.88)
-	rim.light_energy = 0.30
-	rim.shadow_enabled = false
-	world.add_child(rim)
-	## Pivot: drag-yaw; reset to 0 every inventory open.
-	_preview_pivot = Node3D.new()
-	_preview_pivot.name = "PreviewPivot"
-	_preview_pivot.position = Vector3(0.0, PREVIEW_PIVOT_Y, 0.0)
-	world.add_child(_preview_pivot)
-	_preview_pivot.add_child(_make_preview_platform())
-	_unit = ZZUnitView.new()
-	_preview_pivot.add_child(_unit)
-	## Feet on pedestal top (sink so boots plant on the slab).
-	_unit.position = Vector3(0.0, PREVIEW_PLATFORM_H - PREVIEW_UNIT_SINK, 0.0)
-	_unit.setup("preview", _nick if _nick != "" else "—", Color(0.55, 0.5, 0.42))
-	if _unit.get_node_or_null("UnitUI") != null:
-		_unit.get_node("UnitUI").visible = false
-	var cam := Camera3D.new()
-	cam.projection = Camera3D.PROJECTION_PERSPECTIVE
-	cam.fov = 30.0
-	## Camera fixed — raised pivot puts pedestal+unit higher in the pane.
-	cam.position = Vector3(0.0, 1.35, 5.6)
-	cam.current = true
-	world.add_child(cam)
-	cam.look_at(Vector3(0.0, 1.45, 0.0), Vector3.UP)
-	_reset_preview_yaw()
-
-
-func _make_preview_platform() -> Node3D:
-	## Dark metal pedestal (v6). Real directional shadow only — no fake blob.
-	var root := Node3D.new()
-	root.name = "Pedestal"
-	var body := MeshInstance3D.new()
-	var box := BoxMesh.new()
-	box.size = PREVIEW_PLATFORM_SIZE
-	body.mesh = box
-	body.position = Vector3(0.0, PREVIEW_PLATFORM_H * 0.5, 0.0)
-	body.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.10, 0.105, 0.12)
-	mat.metallic = 0.45
-	mat.roughness = 0.72
-	body.material_override = mat
-	root.add_child(body)
-	return root
+	var path := "res://assets/units/stalker_idle_0_64.png"
+	if ResourceLoader.exists(path):
+		_preview_rect.texture = load(path)
+	else:
+		var armed := str(_equipped.get("primary", "")) != "" or str(_equipped.get("secondary", "")) != ""
+		_preview_rect.texture = ZZPixelArt.unit_frame("idle", Color(0.55, 0.5, 0.42), armed)
+	_preview_rect.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_preview_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_preview_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 
 
 func _refresh() -> void:
+	_ensure_preview()
 	_refresh_slots()
 	_refresh_grid()
 	_refresh_locker()

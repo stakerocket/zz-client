@@ -1,572 +1,119 @@
-extends Node3D
+extends Node2D
 class_name ZZUnitView
 
 const MOVE_DURATION := 0.34
-## Run covers hexes 2× faster than walk (same AP timeline feel as 0.5 AP/hex).
 const MOVE_DURATION_RUN := MOVE_DURATION * 0.5
-const CAPSULE_HEIGHT := 2.25
-const CAPSULE_RADIUS := 0.38
-const MODEL_SCENE := preload("res://assets/units/man.glb")
-const MODEL_SCALE := 2.5
-const MODEL_YAW_OFFSET := 0.0
-const ANIM_IDLE := "idle"
-const ANIM_WALK := "walk"
-const ANIM_RUN := "run"
-const ANIM_CROUCH_IDLE := "crouching_idle"
-const ANIM_CROUCH_RUN := "crouching_run"
-const ANIM_HIDE := "hiding"
-const ANIM_FIRE := "idle"
-const ANIM_DEATH := "death"
-const HP_BAR_W := 1.35
-const HP_BAR_H := 0.16
-const FONT_NICK := 70
-const FONT_FLOAT := 96
-const FONT_AIM := FONT_FLOAT # chance popup same size/style as damage
+## Kept for callers (muzzle / pick height in px).
+const CAPSULE_HEIGHT := 48.0
+const MODEL_SCALE := 1.0
+const SPRITE_SCALE := 1.15
+const STALKER_FRAME_DIR := "res://assets/units/"
 
 var player_id: String = ""
 var nick: String = ""
+var level: int = 0
 var hp: int = 100
 var max_hp: int = 100
 var color: Color = Color(0.3, 0.65, 0.95)
 var is_dead: bool = false
 var is_dying: bool = false
 var is_moving: bool = false
-## Run hexes are 2× faster — footstep SFX every other hex keeps walk cadence.
-var _run_foot_hex: int = 0
-
-var _model_root: Node3D
-var _model: Node3D
-var _anim: AnimationPlayer
-var _skeleton: Skeleton3D
-var _hips_bone: int = -1
-var _hips_rest_xz: Vector2 = Vector2.ZERO
-var _meshes: Array[MeshInstance3D] = []
-var _anim_idle: String = ""
-var _anim_walk: String = ""
-var _anim_run: String = ""
-var _anim_crouch_idle: String = ""
-var _anim_crouch_run: String = ""
-var _anim_hide: String = ""
-var _anim_fire: String = ""
-var _anim_death_rifle: String = ""
-var _anim_death_plain: String = ""
-var _ui_root: Node3D
-var _label: Label3D
-var _aim_label: Label3D
-var _hp_root: Node3D
-var _hp_bg: MeshInstance3D
-var _hp_fill: MeshInstance3D
-var _hp_bg_mesh: BoxMesh
-var _hp_fill_mesh: BoxMesh
-var _hp_fill_mat: StandardMaterial3D
-var _aim_root: Node3D
-var _aim_ring: MeshInstance3D
-var _mat: StandardMaterial3D
-var _alive_color: Color = Color(0.3, 0.65, 0.95)
-var _max_initialized: bool = false
-var _move_tween: Tween
 var posture: String = "stand"
+var _run_foot_hex: int = 0
 var _aim_chance: Variant = null
-var _feet_y: float = 0.0
+var _armed := true
+var _anim_frame := 0
+var _anim_timer := 0.0
+var _move_tween: Tween
+var _max_initialized := false
+var _use_stalker_atlas := true
+
+var _sprite: Sprite2D
+var _nick_label: Label
+var _hp_bg: ColorRect
+var _hp_fill: ColorRect
+var _aim_label: Label
+var _ui: Node2D
+var _tex_cache: Dictionary = {}
+var _stalker_frames: Dictionary = {} ## pose/frame -> Texture2D
 
 
 func _ready() -> void:
-	_mat = StandardMaterial3D.new()
-	_mat.albedo_color = Color(color.r, color.g, color.b, 0.0)
-	_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_mat.roughness = 0.55
+	_load_stalker_frames()
+	_sprite = Sprite2D.new()
+	_sprite.centered = true
+	_sprite.position = Vector2(0, -28)
+	_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_sprite.scale = Vector2(SPRITE_SCALE, SPRITE_SCALE)
+	add_child(_sprite)
 
-	_model_root = Node3D.new()
-	_model_root.name = "ModelRoot"
-	_model_root.scale = Vector3.ONE * MODEL_SCALE
-	add_child(_model_root)
-	_spawn_model()
+	_ui = Node2D.new()
+	_ui.z_index = 10
+	add_child(_ui)
 
-	# Screen-aligned UI (copies camera basis) — no Label3D billboard tilt.
-	_ui_root = Node3D.new()
-	_ui_root.name = "UnitUI"
-	_ui_root.position = Vector3(0, CAPSULE_HEIGHT + 0.78, 0)
-	add_child(_ui_root)
+	_nick_label = Label.new()
+	_nick_label.add_theme_font_size_override("font_size", 11)
+	_nick_label.add_theme_color_override("font_color", Color(0.92, 0.93, 0.90))
+	_nick_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	_nick_label.add_theme_constant_override("outline_size", 3)
+	_nick_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_nick_label.position = Vector2(-40, -70)
+	_nick_label.size = Vector2(80, 16)
+	_ui.add_child(_nick_label)
 
-	_label = Label3D.new()
-	_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
-	_label.font_size = FONT_NICK
-	_label.outline_size = 14
-	_label.position = Vector3(0, 0.28, 0)
-	_label.render_priority = 8
-	_label.no_depth_test = true
-	_ui_root.add_child(_label)
+	_hp_bg = ColorRect.new()
+	_hp_bg.color = Color(0.08, 0.08, 0.08, 0.75)
+	_hp_bg.size = Vector2(36, 5)
+	_hp_bg.position = Vector2(-18, -54)
+	_ui.add_child(_hp_bg)
+	_hp_fill = ColorRect.new()
+	_hp_fill.color = Color(0.40, 0.52, 0.36)
+	_hp_fill.size = Vector2(36, 5)
+	_hp_fill.position = Vector2(-18, -54)
+	_ui.add_child(_hp_fill)
 
-	_build_hp_bar()
-	_build_aim_reticle()
-
-	_aim_label = Label3D.new()
-	_aim_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
-	_aim_label.font_size = FONT_AIM
-	_aim_label.outline_size = 16
-	_aim_label.position = Vector3(0, CAPSULE_HEIGHT + 1.7, 0)
+	_aim_label = Label.new()
+	_aim_label.add_theme_font_size_override("font_size", 14)
+	_aim_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.95))
+	_aim_label.add_theme_constant_override("outline_size", 4)
+	_aim_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_aim_label.position = Vector2(-30, -88)
+	_aim_label.size = Vector2(60, 20)
 	_aim_label.visible = false
-	_aim_label.render_priority = 10
-	_aim_label.no_depth_test = true
-	add_child(_aim_label)
+	_ui.add_child(_aim_label)
 
 	_refresh_label()
 	_refresh_hp_bar()
-	_apply_posture_visual()
-	_play_idle()
-
-
-func _spawn_model() -> void:
-	_model = MODEL_SCENE.instantiate() as Node3D
-	_model_root.add_child(_model)
-	_collect_meshes(_model)
-	_polish_model_meshes()
-	_anim = _find_anim_player(_model)
-	_skeleton = _find_skeleton(_model)
-	_cache_hips_bone()
-	if _anim != null:
-		## Sanitize "crouching _idle" → crouching_idle, then bind clips.
-		_prepare_locomotion_anims()
-		_anim_idle = _resolve_anim(ANIM_IDLE, "idle")
-		_anim_walk = _resolve_anim(ANIM_WALK, "walk")
-		if _anim_walk == "":
-			_anim_walk = _anim_idle
-		_anim_run = _resolve_anim(ANIM_RUN, "run")
-		if _anim_run == "":
-			_anim_run = _anim_walk
-		_anim_crouch_idle = _resolve_anim(ANIM_CROUCH_IDLE, "crouching_idle")
-		if _anim_crouch_idle == "":
-			_anim_crouch_idle = _anim_idle
-		_anim_crouch_run = _resolve_anim(ANIM_CROUCH_RUN, "crouching_run")
-		if _anim_crouch_run == "":
-			_anim_crouch_run = _anim_crouch_idle
-		_anim_hide = _resolve_anim(ANIM_HIDE, "hiding")
-		if _anim_hide == "":
-			_anim_hide = _anim_crouch_idle
-		## Fire clip TBD — fall back to idle.
-		_anim_fire = _anim_idle
-		_anim_death_rifle = _resolve_anim_named(ANIM_DEATH)
-		_anim_death_plain = _resolve_anim_named("death")
-		# Advance manually so we can kill Hips root-motion after each pose.
-		_anim.callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
-		_anim.active = true
-	if _meshes.is_empty():
-		push_warning("ZZUnitView: man.glb has no meshes, falling back to capsule")
-		_spawn_capsule_fallback()
-
-
-func _polish_model_meshes() -> void:
-	## Keep full mesh detail + PBR read (Tripo/Blender look). Auto-LOD on a 5k
-	## character makes it look like ~500 tris at battle ortho distance.
-	for mi in _meshes:
-		mi.lod_bias = 0.01
-		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-		var mesh := mi.mesh
-		if mesh == null:
-			continue
-		for si in range(mesh.get_surface_count()):
-			var mat := mi.get_active_material(si)
-			if mat is BaseMaterial3D:
-				var bm: BaseMaterial3D = mat
-				bm.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
-				if bm.normal_enabled:
-					bm.normal_scale = 1.15
-				bm.metallic_specular = 0.55
-
-
-func _sanitize_anim_key(key: String) -> String:
-	## "crouching _idle" / "crouching  _run" → crouching_idle / crouching_run
-	var s := key.strip_edges()
-	while s.contains("  "):
-		s = s.replace("  ", " ")
-	s = s.replace(" _", "_").replace("_ ", "_").replace(" ", "_")
-	return s
-
-
-func _prepare_locomotion_anims() -> void:
-	for lib_name in _anim.get_animation_library_list():
-		var lib: AnimationLibrary = _anim.get_animation_library(lib_name)
-		## Snapshot keys — we may rename while iterating.
-		var keys: Array = lib.get_animation_list()
-		for anim_key in keys:
-			var src := lib.get_animation(anim_key)
-			if src == null:
-				continue
-			var dup: Animation = src.duplicate(true)
-			var key_l := String(anim_key).to_lower()
-			# Keep death root motion (fall); strip locomotion drift on the rest.
-			if not key_l.contains("death"):
-				_strip_hips_root_motion_tracks(dup)
-			if key_l.contains("death") or key_l.contains("fire"):
-				dup.loop_mode = Animation.LOOP_NONE
-			else:
-				dup.loop_mode = Animation.LOOP_LINEAR
-			var clean := _sanitize_anim_key(String(anim_key))
-			lib.remove_animation(anim_key)
-			## Avoid clobber if clean name already exists from a prior pass.
-			if lib.has_animation(clean):
-				lib.remove_animation(clean)
-			lib.add_animation(clean, dup)
-
-
-func _strip_hips_root_motion_tracks(anim: Animation) -> void:
-	# Best-effort: freeze Hips translation keys (Godot track types vary by import).
-	for ti in range(anim.get_track_count() - 1, -1, -1):
-		var path := String(anim.track_get_path(ti))
-		if not path.contains("Hips"):
-			continue
-		var t := anim.track_get_type(ti)
-		if t == Animation.TYPE_POSITION_3D:
-			var keys := anim.track_get_key_count(ti)
-			if keys <= 0:
-				continue
-			var base: Vector3 = anim.track_get_key_value(ti, 0)
-			for k in keys:
-				var v: Vector3 = anim.track_get_key_value(ti, k)
-				anim.track_set_key_value(ti, k, Vector3(base.x, v.y, base.z))
-		elif t == Animation.TYPE_VALUE:
-			# Some imports store Vector3 as value tracks on :position.
-			if not path.contains("position"):
-				continue
-			var keys_v := anim.track_get_key_count(ti)
-			if keys_v <= 0:
-				continue
-			var base_v: Variant = anim.track_get_key_value(ti, 0)
-			if typeof(base_v) != TYPE_VECTOR3:
-				continue
-			var b: Vector3 = base_v
-			for k in keys_v:
-				var vv: Variant = anim.track_get_key_value(ti, k)
-				if typeof(vv) != TYPE_VECTOR3:
-					continue
-				var v3: Vector3 = vv
-				anim.track_set_key_value(ti, k, Vector3(b.x, v3.y, b.z))
-
-
-func _find_skeleton(n: Node) -> Skeleton3D:
-	if n is Skeleton3D:
-		return n as Skeleton3D
-	for c in n.get_children():
-		var found := _find_skeleton(c)
-		if found != null:
-			return found
-	return null
-
-
-func _cache_hips_bone() -> void:
-	_hips_bone = -1
-	if _skeleton == null:
-		return
-	for i in _skeleton.get_bone_count():
-		var bname := String(_skeleton.get_bone_name(i))
-		if bname.contains("Hips"):
-			_hips_bone = i
-			var rest := _skeleton.get_bone_rest(i).origin
-			_hips_rest_xz = Vector2(rest.x, rest.z)
-			return
-
-
-func _lock_hips_in_place() -> void:
-	if _skeleton == null or _hips_bone < 0:
-		return
-	# Death clip may intentionally move the root; don't fight it.
-	if is_dying or is_dead:
-		return
-	if _anim != null and String(_anim.current_animation).to_lower().contains("death"):
-		return
-	var p := _skeleton.get_bone_pose_position(_hips_bone)
-	_skeleton.set_bone_pose_position(
-		_hips_bone,
-		Vector3(_hips_rest_xz.x, p.y, _hips_rest_xz.y)
-	)
-
-
-func _spawn_capsule_fallback() -> void:
-	var capsule := CapsuleMesh.new()
-	capsule.radius = CAPSULE_RADIUS
-	capsule.height = CAPSULE_HEIGHT
-	var body := MeshInstance3D.new()
-	body.mesh = capsule
-	var body_mat := StandardMaterial3D.new()
-	body_mat.albedo_color = color
-	body_mat.roughness = 0.55
-	body.material_override = body_mat
-	body.position = Vector3(0, CAPSULE_HEIGHT * 0.5, 0)
-	_model_root.add_child(body)
-	_meshes.append(body)
-
-
-func _find_anim_player(n: Node) -> AnimationPlayer:
-	if n is AnimationPlayer:
-		return n as AnimationPlayer
-	for c in n.get_children():
-		var found := _find_anim_player(c)
-		if found != null:
-			return found
-	return null
-
-
-func _collect_meshes(n: Node) -> void:
-	if n is MeshInstance3D:
-		_meshes.append(n as MeshInstance3D)
-	for c in n.get_children():
-		_collect_meshes(c)
-
-
-func _resolve_anim_named(preferred: String) -> String:
-	if _anim == null:
-		return ""
-	for n in _anim.get_animation_list():
-		var s := String(n)
-		if s == preferred or s.ends_with("/" + preferred):
-			return s
-	return ""
-
-
-func _resolve_anim(preferred: String, hint: String) -> String:
-	if preferred != "":
-		var exact := _resolve_anim_named(preferred)
-		if exact != "":
-			return exact
-	if _anim == null or hint == "":
-		return ""
-	var hint_l := hint.to_lower()
-	for n in _anim.get_animation_list():
-		var s := String(n)
-		var sl := s.to_lower()
-		## Prefer clip whose leaf name contains the hint (skip junk Layer0).
-		if sl.contains("layer"):
-			continue
-		if sl.contains(hint_l) or sl.get_file().contains(hint_l):
-			return s
-	return ""
-
-
-func _is_playing_anim(anim_name: String) -> bool:
-	if _anim == null or anim_name == "" or not _anim.is_playing():
-		return false
-	var cur := String(_anim.current_animation)
-	return cur == anim_name or cur.ends_with("/" + anim_name) or cur.get_file() == anim_name
-
-
-func _idle_clip_for_posture() -> String:
-	match posture:
-		"sit":
-			return _anim_crouch_idle
-		"cover":
-			return _anim_hide
-		_:
-			return _anim_idle
-
-
-func _move_clip_for_posture() -> String:
-	match posture:
-		"sit":
-			return _anim_crouch_run
-		"cover":
-			## Low profile: crouch-run while shifting in cover.
-			return _anim_crouch_run
-		"run":
-			return _anim_run
-		_:
-			return _anim_walk
-
-
-func _play_idle() -> void:
-	var clip := _idle_clip_for_posture()
-	if _anim == null or clip == "" or is_dead or is_dying:
-		return
-	if _is_playing_anim(clip):
-		return
-	_anim.play(clip)
-
-
-func _play_locomotion() -> void:
-	var clip := _move_clip_for_posture()
-	if _anim == null or clip == "" or is_dead or is_dying:
-		return
-	# Critical: StringName != String would restart the clip every hex.
-	if _is_playing_anim(clip):
-		return
-	_anim.play(clip)
-
-
-func _anim_length(anim_name: String) -> float:
-	if _anim == null or anim_name == "":
-		return 0.0
-	var a := _anim.get_animation(anim_name)
-	if a == null:
-		return 0.0
-	return maxf(a.length, 0.05)
-
-
-func face_world(world_target: Vector3) -> void:
-	_face_toward(world_target)
-
-
-func facing_forward_xz() -> Vector3:
-	var yaw := 0.0
-	if _model_root != null:
-		yaw = _model_root.rotation.y
-	return Vector3(sin(yaw), 0.0, cos(yaw))
-
-
-func play_fire() -> void:
-	if is_dead or is_dying:
-		return
-	if _anim == null or _anim_fire == "":
-		await get_tree().create_timer(0.15).timeout
-		return
-	_anim.play(_anim_fire)
-	await get_tree().create_timer(_anim_length(_anim_fire)).timeout
-	if not is_dead and not is_dying and not is_moving:
-		_play_idle()
-
-
-func _face_toward(world_target: Vector3) -> void:
-	if _model_root == null:
-		return
-	var d := world_target - global_position
-	d.y = 0.0
-	if d.length_squared() < 0.0001:
-		return
-	var yaw := atan2(d.x, d.z) + MODEL_YAW_OFFSET
-	# Skip tiny yaw snaps between co-linear hexes (reduces visual hitch).
-	if abs(wrapf(yaw - _model_root.rotation.y, -PI, PI)) < 0.02:
-		return
-	_model_root.rotation.y = yaw
-
-
-func _set_overlay_alpha(alpha: float, tint: Color) -> void:
-	_mat.albedo_color = Color(tint.r, tint.g, tint.b, clampf(alpha, 0.0, 1.0))
-	for mi in _meshes:
-		if mi == null or not is_instance_valid(mi):
-			continue
-		mi.material_overlay = _mat if alpha > 0.02 else null
-
-
-func _clear_overlay() -> void:
-	_set_overlay_alpha(0.0, color)
-
-
-func _build_hp_bar() -> void:
-	# Lives under _ui_root so it stays screen-aligned with the nick.
-	_hp_root = Node3D.new()
-	_hp_root.name = "HpBar"
-	_hp_root.position = Vector3(0, 0.0, 0)
-	_ui_root.add_child(_hp_root)
-
-	_hp_bg_mesh = BoxMesh.new()
-	_hp_bg_mesh.size = Vector3(HP_BAR_W, HP_BAR_H, 0.04)
-	_hp_bg = MeshInstance3D.new()
-	_hp_bg.mesh = _hp_bg_mesh
-	var bg_mat := StandardMaterial3D.new()
-	bg_mat.albedo_color = Color(0.08, 0.08, 0.1, 0.92)
-	bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	bg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	bg_mat.no_depth_test = true
-	bg_mat.render_priority = 6
-	_hp_bg.material_override = bg_mat
-	_hp_root.add_child(_hp_bg)
-
-	_hp_fill_mesh = BoxMesh.new()
-	_hp_fill_mesh.size = Vector3(HP_BAR_W, HP_BAR_H * 0.72, 0.05)
-	_hp_fill = MeshInstance3D.new()
-	_hp_fill.mesh = _hp_fill_mesh
-	_hp_fill.position = Vector3(0, 0, 0.02)
-	_hp_fill_mat = StandardMaterial3D.new()
-	_hp_fill_mat.albedo_color = Color(0.22, 0.82, 0.28, 1.0)
-	_hp_fill_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_hp_fill_mat.no_depth_test = true
-	_hp_fill_mat.render_priority = 7
-	_hp_fill.material_override = _hp_fill_mat
-	_hp_root.add_child(_hp_fill)
-
-
-func _make_aim_mat(col: Color) -> StandardMaterial3D:
-	var m := StandardMaterial3D.new()
-	m.albedo_color = col
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	# Draw on top of the body so the reticle is never occluded.
-	m.no_depth_test = true
-	m.render_priority = 12
-	return m
-
-
-func _build_aim_reticle() -> void:
-	_aim_root = Node3D.new()
-	_aim_root.name = "AimReticle"
-	_aim_root.visible = false
-	_aim_root.position = Vector3(0, CAPSULE_HEIGHT * 0.55, 0)
-	add_child(_aim_root)
-
-	_aim_ring = MeshInstance3D.new()
-	var torus := TorusMesh.new()
-	torus.inner_radius = 0.62
-	torus.outer_radius = 0.72
-	torus.rings = 12
-	torus.ring_segments = 28
-	_aim_ring.mesh = torus
-	# Torus lies in XZ by default; rotate so ring faces camera after look_at.
-	_aim_ring.rotation_degrees = Vector3(90, 0, 0)
-	_aim_ring.material_override = _make_aim_mat(Color(0.95, 0.3, 0.25, 0.95))
-	_aim_root.add_child(_aim_ring)
-
-	# Crosshair ticks (in aim_root local XY after look_at).
-	for i in 4:
-		var tick := MeshInstance3D.new()
-		var box := BoxMesh.new()
-		box.size = Vector3(0.08, 0.36, 0.08)
-		tick.mesh = box
-		tick.material_override = _make_aim_mat(Color(0.95, 0.3, 0.25, 0.95))
-		match i:
-			0:
-				tick.position = Vector3(0, 0.88, 0)
-			1:
-				tick.position = Vector3(0, -0.88, 0)
-			2:
-				tick.position = Vector3(0.88, 0, 0)
-				tick.rotation_degrees = Vector3(0, 0, 90)
-			3:
-				tick.position = Vector3(-0.88, 0, 0)
-				tick.rotation_degrees = Vector3(0, 0, 90)
-		_aim_root.add_child(tick)
-
-
-func _face_screen(node: Node3D, cam: Camera3D) -> void:
-	# Match camera orientation → UI stays level on screen (like reference plates).
-	node.global_basis = cam.global_basis
+	_refresh_sprite()
 
 
 func _process(delta: float) -> void:
-	if _anim != null and _anim.active:
-		_anim.advance(delta)
-		_lock_hips_in_place()
-	var cam := get_viewport().get_camera_3d()
-	if cam == null:
+	if is_dead or is_dying:
 		return
-	if _ui_root != null and _ui_root.visible:
-		_face_screen(_ui_root, cam)
-	if _aim_label != null and _aim_label.visible:
-		_face_screen(_aim_label, cam)
-	if _aim_root != null and _aim_root.visible:
-		_face_screen(_aim_root, cam)
-		var to_cam := -cam.global_transform.basis.z
-		to_cam.y = 0.0
-		if to_cam.length_squared() > 0.0001:
-			to_cam = to_cam.normalized()
-			_aim_root.global_position = global_position + Vector3(0, CAPSULE_HEIGHT * 0.55, 0) + to_cam * 0.55
+	var animating := posture == "run" or posture == "walk" or is_moving
+	if not animating and _use_stalker_atlas and posture == "stand":
+		## Subtle idle breathe between idle_0 / idle_1.
+		_anim_timer += delta
+		if _anim_timer >= 0.45:
+			_anim_timer = 0.0
+			_anim_frame = (_anim_frame + 1) % 2
+			_refresh_sprite()
+		return
+	if animating:
+		_anim_timer += delta
+		if _anim_timer >= 0.12:
+			_anim_timer = 0.0
+			_anim_frame = (_anim_frame + 1) % 4
+			_refresh_sprite()
 
 
 func setup(id: String, player_nick: String, unit_color: Color) -> void:
 	player_id = id
 	nick = player_nick
 	color = unit_color
-	_alive_color = unit_color
 	_refresh_label()
 	_refresh_hp_bar()
+	_refresh_sprite()
 
 
 func set_max_hp(value: int) -> void:
@@ -577,171 +124,48 @@ func set_max_hp(value: int) -> void:
 		_refresh_hp_bar()
 
 
-func set_hp(value: int, animate_death: bool = true, front_blocked: bool = false) -> void:
-	var prev := hp
+func set_hp(value: int, _animate: bool = true, _front_blocked: bool = false) -> void:
 	hp = value
-	if not _max_initialized:
-		max_hp = maxi(hp, 1)
-		_max_initialized = true
-	elif hp > max_hp:
-		max_hp = hp
-	_refresh_label()
+	if not _max_initialized and value > max_hp:
+		max_hp = value
 	_refresh_hp_bar()
-	if animate_death and prev > 0 and hp <= 0 and not is_dead:
-		play_death(front_blocked)
-	elif hp > 0 and is_dead:
-		_reset_alive_visual()
+	_refresh_label()
+	if hp <= 0 and not is_dead and not is_dying:
+		await play_death(_front_blocked)
 
 
 func apply_hit(damage: int, hp_after: int, front_blocked: bool = false, crit: bool = false) -> void:
-	show_damage_number(damage, crit)
 	await flash_hit()
-	var will_die := hp > 0 and hp_after <= 0 and not is_dead
-	set_hp(hp_after, false)
-	if will_die:
-		await play_death(front_blocked)
+	show_damage_number(damage, crit)
+	await set_hp(hp_after, true, front_blocked)
 
 
-## hits: Array of {damage, crit} — one float per cartridge (burst).
 func apply_hits(hits: Array, hp_after: int, front_blocked: bool = false) -> void:
-	if hits.is_empty():
-		await flash_hit()
-		set_hp(hp_after, false)
-		return
-	var shown := 0
-	for i in range(hits.size()):
-		var h: Variant = hits[i]
+	await flash_hit()
+	var i := 0
+	for h in hits:
 		if typeof(h) != TYPE_DICTIONARY:
 			continue
-		var dmg := int(h.get("damage", 0))
-		var is_crit := bool(h.get("crit", false))
-		if dmg <= 0:
-			continue
-		if shown > 0:
-			await get_tree().create_timer(0.22).timeout
-		# Vertical column only (no side shift).
-		show_damage_number(dmg, is_crit, 0.0, float(shown) * 0.78)
-		shown += 1
-	await flash_hit()
-	var will_die := hp > 0 and hp_after <= 0 and not is_dead
-	set_hp(hp_after, false)
-	if will_die:
-		await play_death(front_blocked)
-
-
-func apply_heal(heal: int, hp_after: int) -> void:
-	if heal > 0:
-		show_heal_number(heal)
-	await flash_heal()
-	set_hp(hp_after, false)
-
-
-func show_heal_number(heal: int) -> void:
-	_float_label("+%d" % heal, Color(0.3, 0.95, 0.4, 1.0))
-
-
-func flash_heal() -> void:
-	var tint := Color(0.55, 1.0, 0.65, 1.0)
-	var tw := create_tween()
-	tw.set_parallel(true)
-	tw.tween_property(self, "scale", Vector3(1.12, 1.12, 1.12), 0.08)
-	tw.tween_method(func(a: float) -> void: _set_overlay_alpha(a, tint), 0.0, 0.7, 0.08)
-	tw.chain().set_parallel(true)
-	tw.tween_property(self, "scale", Vector3.ONE, 0.12)
-	tw.tween_method(func(a: float) -> void: _set_overlay_alpha(a, tint), 0.7, 0.0, 0.12)
-	await tw.finished
-	_clear_overlay()
-
-
-func snap_to(world_pos: Vector3) -> void:
-	if _move_tween != null and is_instance_valid(_move_tween):
-		_move_tween.kill()
-	_move_tween = null
-	is_moving = false
-	_feet_y = world_pos.y
-	position = Vector3(world_pos.x, _feet_y, world_pos.z)
-	_play_idle()
-
-
-func animate_move_to(world_pos: Vector3, with_sfx: bool = false, stop_at_end: bool = true) -> void:
-	if is_dead or is_dying:
-		return
-	if _move_tween != null and is_instance_valid(_move_tween):
-		_move_tween.kill()
-	is_moving = true
-	if with_sfx:
-		if posture == "run":
-			# Same real-time cadence as walk: one SFX per MOVE_DURATION, not per hex.
-			if _run_foot_hex % 2 == 0:
-				Sfx.play_walk()
-			_run_foot_hex += 1
-		else:
-			_run_foot_hex = 0
-			Sfx.play_walk()
-	_feet_y = world_pos.y
-	var target := Vector3(world_pos.x, _feet_y, world_pos.z)
-	_face_toward(target)
-	_play_locomotion()
-	var dur := MOVE_DURATION_RUN if posture == "run" else MOVE_DURATION
-	var tw := create_tween()
-	_move_tween = tw
-	# Mid-path: linear (no ease restart each hex). Last step: soft ease-out into idle.
-	if stop_at_end:
-		tw.tween_property(self, "position", target, dur).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	else:
-		tw.tween_property(self, "position", target, dur).set_trans(Tween.TRANS_LINEAR)
-	await tw.finished
-	if _move_tween == tw:
-		position = target
-		_move_tween = null
-		if stop_at_end:
-			is_moving = false
-			_run_foot_hex = 0
-			_play_idle()
-
-
-func show_damage_number(damage: int, crit: bool = false, x_off: float = 0.0, y_off: float = 0.0) -> void:
-	if crit:
-		_float_label("крит -%d" % damage, Color(1.0, 0.85, 0.2, 1.0), x_off, y_off)
-	else:
-		_float_label("-%d" % damage, Color(1.0, 0.35, 0.25, 1.0), x_off, y_off)
-
-
-func show_miss() -> void:
-	_float_label("мимо", Color(0.75, 0.78, 0.85, 1.0))
-
-
-func _float_label(text: String, col: Color, x_off: float = 0.0, y_off: float = 0.0) -> void:
-	var lbl := Label3D.new()
-	lbl.text = text
-	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	lbl.font_size = FONT_FLOAT
-	lbl.outline_size = 18
-	lbl.modulate = col
-	lbl.position = Vector3(x_off, CAPSULE_HEIGHT + 1.38 + y_off, 0)
-	lbl.render_priority = 16 + int(y_off * 10.0)
-	lbl.no_depth_test = true
-	add_child(lbl)
-	var start_y := lbl.position.y
-	var tw := create_tween()
-	tw.set_parallel(true)
-	tw.tween_property(lbl, "position:y", start_y + 0.7, 0.75).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tw.tween_property(lbl, "modulate:a", 0.0, 0.75).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
-	tw.chain().tween_callback(lbl.queue_free)
+		var hd := int(h.get("damage", 0))
+		var hc := bool(h.get("crit", false))
+		if hd > 0:
+			show_damage_number(hd, hc, 0.0, float(i) * 10.0)
+			i += 1
+	await set_hp(hp_after, true, front_blocked)
 
 
 func apply_miss() -> void:
 	show_miss()
-	await flash_miss()
+	await get_tree().create_timer(0.15).timeout
 
 
-func flash_miss() -> void:
-	var tint := Color(0.7, 0.75, 0.85, 1.0)
-	var tw := create_tween()
-	tw.tween_method(func(a: float) -> void: _set_overlay_alpha(a, tint), 0.0, 0.55, 0.08)
-	tw.tween_method(func(a: float) -> void: _set_overlay_alpha(a, tint), 0.55, 0.0, 0.18)
-	await tw.finished
-	_clear_overlay()
+func facing_forward_xz() -> Vector2:
+	return Vector2(-1.0 if _sprite != null and _sprite.flip_h else 1.0, 0.0)
+
+
+func set_level(value: int) -> void:
+	level = maxi(0, value)
+	_refresh_label()
 
 
 func set_posture(value: String) -> void:
@@ -755,12 +179,94 @@ func set_posture(value: String) -> void:
 		_:
 			posture = "stand"
 	if not is_dying and not is_dead:
-		_apply_posture_visual()
-		if is_moving:
-			_play_locomotion()
+		_refresh_sprite()
+
+
+func set_armed(armed: bool) -> void:
+	_armed = armed
+	_refresh_sprite()
+
+
+func snap_to(world_pos: Vector2) -> void:
+	position = world_pos
+
+
+func animate_move_to(world_pos: Vector2, play_sfx: bool = true, stop_at_end: bool = true) -> void:
+	if _move_tween != null and is_instance_valid(_move_tween):
+		_move_tween.kill()
+	is_moving = true
+	if play_sfx:
+		if posture == "run":
+			if _run_foot_hex % 2 == 0:
+				Sfx.play_walk()
+			_run_foot_hex += 1
 		else:
-			_play_idle()
-	_refresh_label()
+			_run_foot_hex = 0
+			Sfx.play_walk()
+	var dur := MOVE_DURATION_RUN if posture == "run" else MOVE_DURATION
+	face_world(world_pos)
+	_move_tween = create_tween()
+	if stop_at_end:
+		_move_tween.tween_property(self, "position", world_pos, dur).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	else:
+		_move_tween.tween_property(self, "position", world_pos, dur).set_trans(Tween.TRANS_LINEAR)
+	await _move_tween.finished
+	is_moving = false
+	if stop_at_end:
+		_run_foot_hex = 0
+		_refresh_sprite()
+
+
+func face_world(world_target: Vector2) -> void:
+	if world_target.x < position.x - 1.0:
+		_sprite.flip_h = true
+	elif world_target.x > position.x + 1.0:
+		_sprite.flip_h = false
+
+
+func play_fire() -> void:
+	var tw := create_tween()
+	tw.tween_property(_sprite, "modulate", Color(1.4, 1.3, 1.0), 0.05)
+	tw.tween_property(_sprite, "modulate", Color.WHITE, 0.08)
+
+
+func flash_hit() -> void:
+	var tw := create_tween()
+	tw.tween_property(_sprite, "modulate", Color(1.0, 0.4, 0.35), 0.06)
+	tw.tween_property(_sprite, "modulate", Color.WHITE, 0.12)
+	await tw.finished
+
+
+func play_death(_front_blocked: bool = false) -> void:
+	if is_dying or is_dead:
+		return
+	is_dying = true
+	is_dead = true
+	clear_aim_preview()
+	if _move_tween != null and is_instance_valid(_move_tween):
+		_move_tween.kill()
+	is_moving = false
+	Sfx.play_death()
+	posture = "death"
+	_refresh_sprite()
+	var tw := create_tween()
+	tw.tween_property(_sprite, "modulate:a", 0.55, 0.4)
+	await tw.finished
+	_ui.visible = false
+
+
+func show_damage_number(damage: int, crit: bool = false, _x_off: float = 0.0, _y_off: float = 0.0) -> void:
+	var text := ("крит -%d" % damage) if crit else ("-%d" % damage)
+	var col := Color(1.0, 0.85, 0.2) if crit else Color(1.0, 0.35, 0.25)
+	_float_text(text, col)
+
+
+func show_miss() -> void:
+	_float_text("мимо", Color(0.75, 0.78, 0.85))
+
+
+func show_heal(heal: int) -> void:
+	_float_text("+%d" % heal, Color(0.3, 0.95, 0.4))
 
 
 func set_aim_preview(info: Variant) -> void:
@@ -775,162 +281,146 @@ func clear_aim_preview() -> void:
 	_refresh_aim_visual()
 
 
-func flash_hit() -> void:
-	var tint := Color(1.0, 0.45, 0.35, 1.0)
+func _float_text(text: String, col: Color) -> void:
+	var lbl := Label.new()
+	lbl.text = text
+	lbl.add_theme_font_size_override("font_size", 13)
+	lbl.add_theme_color_override("font_color", col)
+	lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.95))
+	lbl.add_theme_constant_override("outline_size", 4)
+	lbl.position = Vector2(-24, -78)
+	add_child(lbl)
 	var tw := create_tween()
-	tw.set_parallel(true)
-	tw.tween_property(self, "scale", Vector3(1.15, 1.15, 1.15), 0.08)
-	tw.tween_method(func(a: float) -> void: _set_overlay_alpha(a, tint), 0.0, 0.75, 0.08)
-	tw.chain().set_parallel(true)
-	tw.tween_property(self, "scale", Vector3.ONE, 0.12)
-	tw.tween_method(func(a: float) -> void: _set_overlay_alpha(a, tint), 0.75, 0.0, 0.12)
+	tw.tween_property(lbl, "position:y", lbl.position.y - 28.0, 0.7).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(lbl, "modulate:a", 0.0, 0.7)
 	await tw.finished
-	_clear_overlay()
-
-
-func play_death(front_blocked: bool = false) -> void:
-	if is_dying or is_dead:
-		return
-	is_dying = true
-	is_dead = true
-	clear_aim_preview()
-	if _move_tween != null and is_instance_valid(_move_tween):
-		_move_tween.kill()
-	_move_tween = null
-	is_moving = false
-	Sfx.play_death()
-	# Clear front → fall with rifle; obstacle ahead → compact death.
-	var clip := ""
-	if front_blocked:
-		clip = _anim_death_plain if _anim_death_plain != "" else _anim_death_rifle
-	else:
-		clip = _anim_death_rifle if _anim_death_rifle != "" else _anim_death_plain
-	if _anim != null and clip != "":
-		_anim.play(clip)
-		await get_tree().create_timer(_anim_length(clip)).timeout
-	else:
-		var tint := Color(0.25, 0.25, 0.25, 1.0)
-		var tw := create_tween()
-		tw.set_parallel(true)
-		tw.tween_property(self, "scale", Vector3(0.2, 0.2, 0.2), 0.55).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
-		tw.tween_method(func(a: float) -> void: _set_overlay_alpha(a, tint), 0.0, 0.85, 0.4)
-		await tw.finished
-	_on_death_finished()
-
-
-func _on_death_finished() -> void:
-	is_dying = false
-	# Keep corpse mesh in final death pose; only clear HUD.
-	if _ui_root:
-		_ui_root.visible = false
-	if _label:
-		_label.visible = false
-	if _hp_root:
-		_hp_root.visible = false
-	elif _hp_bg:
-		_hp_bg.visible = false
-	if _hp_fill:
-		_hp_fill.visible = false
-	if _aim_root:
-		_aim_root.visible = false
-	_clear_overlay()
-
-
-func _reset_alive_visual() -> void:
-	is_dead = false
-	is_dying = false
-	is_moving = false
-	scale = Vector3.ONE
-	position.y = _feet_y
-	color = _alive_color
-	_clear_overlay()
-	if _ui_root:
-		_ui_root.visible = true
-	if _label:
-		_label.visible = true
-	if _hp_root:
-		_hp_root.visible = true
-	if _hp_bg:
-		_hp_bg.visible = true
-	if _hp_fill:
-		_hp_fill.visible = true
-	if _model_root:
-		_model_root.visible = true
-	_apply_posture_visual()
-	_refresh_hp_bar()
-	_play_idle()
+	if is_instance_valid(lbl):
+		lbl.queue_free()
 
 
 func _refresh_label() -> void:
-	if _label:
-		_label.text = nick
-
-
-func _hp_ratio() -> float:
-	var pool := maxf(float(max_hp), 1.0)
-	return clampf(float(maxi(hp, 0)) / pool, 0.0, 1.0)
-
-
-func _hp_bar_color(ratio: float) -> Color:
-	if ratio >= 0.5:
-		var t := (1.0 - ratio) * 2.0
-		return Color(0.22, 0.82, 0.28).lerp(Color(0.95, 0.82, 0.18), t)
-	var t2 := (0.5 - ratio) * 2.0
-	return Color(0.95, 0.82, 0.18).lerp(Color(0.9, 0.18, 0.14), t2)
+	if _nick_label == null:
+		return
+	if level > 0:
+		_nick_label.text = "%s [%d]" % [nick, level]
+	else:
+		_nick_label.text = nick
 
 
 func _refresh_hp_bar() -> void:
-	if _hp_fill == null or _hp_fill_mesh == null or _hp_fill_mat == null:
+	if _hp_fill == null:
 		return
-	var ratio := _hp_ratio()
-	var fill_w := HP_BAR_W * ratio
-	# Resize mesh (not scale) so length matches HP exactly; grow from left edge.
-	_hp_fill_mesh.size = Vector3(maxf(fill_w, 0.001), HP_BAR_H * 0.72, 0.05)
-	_hp_fill.position = Vector3(-HP_BAR_W * 0.5 + fill_w * 0.5, 0.0, 0.02)
-	_hp_fill.visible = ratio > 0.001
-	_hp_fill_mat.albedo_color = _hp_bar_color(ratio)
+	var ratio := clampf(float(maxi(hp, 0)) / float(maxi(max_hp, 1)), 0.0, 1.0)
+	_hp_fill.size.x = 36.0 * ratio
+	if ratio > 0.55:
+		_hp_fill.color = Color(0.40, 0.52, 0.36)
+	elif ratio > 0.25:
+		_hp_fill.color = Color(0.72, 0.62, 0.34)
+	else:
+		_hp_fill.color = Color(0.75, 0.28, 0.22)
+	_ui.visible = not is_dead
 
 
 func _refresh_aim_visual() -> void:
-	if _aim_label == null or _aim_root == null:
+	if _aim_label == null:
 		return
 	if _aim_chance == null or typeof(_aim_chance) != TYPE_DICTIONARY:
 		_aim_label.visible = false
-		_aim_root.visible = false
 		return
 	var info: Dictionary = _aim_chance
-	var text := "блок"
-	var col := Color(0.95, 0.25, 0.22, 0.95)
-	if bool(info.get("blocked", false)):
-		col = Color(0.7, 0.7, 0.72, 0.95)
-		text = "блок"
-	elif not bool(info.get("can_shoot", true)):
-		col = Color(0.85, 0.7, 0.25, 0.95)
-		text = "—"
-	elif info.has("melee_reach") and not bool(info.get("melee_reach", true)):
-		## Knife planned far: server skips unless target closes — show reach hint, not fake %.
-		col = Color(0.85, 0.75, 0.35, 0.95)
-		text = "даль"
+	var blocked := bool(info.get("blocked", false))
+	var can_shoot := bool(info.get("can_shoot", false))
+	var melee_ok := bool(info.get("melee_reach", true))
+	if blocked or not melee_ok:
+		_aim_label.text = "блок"
+		_aim_label.add_theme_color_override("font_color", Color(0.85, 0.35, 0.3))
 	else:
-		text = "%d%%" % int(round(float(info.get("chance", 0.0)) * 100.0))
-		col = Color(0.95, 0.35, 0.3, 0.95)
-	_aim_label.text = text
-	_aim_label.modulate = col
+		_aim_label.text = "%d%%" % int(round(float(info.get("chance", 0.0)) * 100.0))
+		_aim_label.add_theme_color_override("font_color", Color(0.95, 0.9, 0.4) if can_shoot else Color(0.7, 0.7, 0.72))
 	_aim_label.visible = true
-	_aim_root.visible = true
-	# Recolor reticle
-	for c in _aim_root.get_children():
-		if c is MeshInstance3D:
-			var mi: MeshInstance3D = c
-			var m: StandardMaterial3D = mi.material_override
-			if m:
-				m.albedo_color = Color(col.r, col.g, col.b, 0.95)
-				m.no_depth_test = true
-				m.render_priority = 12
 
 
-func _apply_posture_visual() -> void:
-	## Real Mixamo clips carry posture now — keep uniform scale.
-	if _model_root == null:
+func _pose_key() -> String:
+	if is_dead or is_dying or posture == "death":
+		return "death"
+	if is_moving:
+		return "run" if posture == "run" else "walk"
+	match posture:
+		"sit":
+			return "sit"
+		"cover":
+			return "cover"
+		"run":
+			return "run"
+		_:
+			return "idle"
+
+
+func _load_stalker_frames() -> void:
+	_stalker_frames.clear()
+	var map := {
+		"idle_0": "stalker_idle_0_64.png",
+		"idle_1": "stalker_idle_1_64.png",
+		"walk_0": "stalker_walk_0_64.png",
+		"walk_1": "stalker_walk_1_64.png",
+		"walk_2": "stalker_walk_2_64.png",
+		"run_0": "stalker_walk_0_64.png",
+		"run_1": "stalker_walk_1_64.png",
+		"run_2": "stalker_walk_2_64.png",
+		"sit_0": "stalker_sit_64.png",
+		"cover_0": "stalker_cover_64.png",
+		"death_0": "stalker_death_64.png",
+	}
+	var ok := 0
+	for k in map.keys():
+		var path: String = STALKER_FRAME_DIR + str(map[k])
+		if ResourceLoader.exists(path):
+			var tex: Texture2D = load(path)
+			if tex != null:
+				_stalker_frames[k] = tex
+				ok += 1
+	_use_stalker_atlas = ok >= 5
+
+
+func _stalker_tex(pose: String, frame: int) -> Texture2D:
+	var f := frame
+	match pose:
+		"idle":
+			f = frame % 2
+		"walk", "run":
+			f = frame % 3
+		_:
+			f = 0
+	var key := "%s_%d" % [pose, f]
+	if _stalker_frames.has(key):
+		return _stalker_frames[key]
+	## fallback aliases
+	if pose == "run" and _stalker_frames.has("walk_%d" % f):
+		return _stalker_frames["walk_%d" % f]
+	if _stalker_frames.has("idle_0"):
+		return _stalker_frames["idle_0"]
+	return null
+
+
+func _refresh_sprite() -> void:
+	if _sprite == null:
 		return
-	_model_root.scale = Vector3.ONE * MODEL_SCALE
+	var pose := _pose_key()
+	var frame := _anim_frame if (pose == "run" or pose == "walk" or pose == "idle") else 0
+	if _use_stalker_atlas:
+		var tex := _stalker_tex(pose, frame)
+		if tex != null:
+			_sprite.texture = tex
+			## Light team tint so allies/enemies differ without recoloring camo.
+			var tint := Color(1, 1, 1)
+			if color.b > color.r + 0.1:
+				tint = Color(0.85, 0.92, 1.15)
+			elif color.r > color.b + 0.1:
+				tint = Color(1.15, 0.88, 0.85)
+			if not is_dying and not is_dead:
+				_sprite.modulate = tint
+			return
+	var key := "%s_%s_%d_%d" % [pose, color.to_html(false), int(_armed), frame]
+	if not _tex_cache.has(key):
+		_tex_cache[key] = ZZPixelArt.unit_frame(pose, color, _armed, frame)
+	_sprite.texture = _tex_cache[key]

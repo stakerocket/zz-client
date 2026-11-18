@@ -1,42 +1,31 @@
 ﻿extends Node
 
-const ORTHO_SIZE_MIN := 22.0 # closest — default battle zoom (no auto-fit)
-const ORTHO_SIZE_MAX := 40.0 # farthest — beyond this the map becomes a postage stamp
+const ZOOM_MAX := 1.35 ## closest
+const ZOOM_MIN := 0.55 ## farthest
 const ZOOM_STEP := 0.08
-const PAN_KEY_SPEED := 18.0 # world units / sec
-const CAM_PITCH_DEG := -55.0
-## Yaw 0: map axes align with screen (rectangle). Non-zero yaw turns the field into a diamond.
-const CAM_YAW_DEG := 0.0
-const CAM_HEIGHT := 28.0
-## Fallback if chat dock rect is not ready yet.
-const CHAT_BOTTOM_FRAC := 0.28
-## Extra gap above the real chat/players strip so the map does not sit under it.
-const CHAT_PAD_PX := 2.0
-## Max black void above the north edge of the map when panning up (viewport-px).
+const PAN_KEY_SPEED := 420.0 ## px / sec at zoom 1
+const HUD_BOTTOM_FRAC := 0.18
+const HUD_PAD_PX := 2.0
 const TOP_VOID_MAX_PX := 50.0
-## Max black void past left/right map edge when map is wider than the screen (viewport-px).
 const SIDE_VOID_MAX_PX := 100.0
 
-## Battle-only ortho camera. Lobby/login must NEVER make this current.
-@onready var battle_camera: Camera3D = $Camera3D
-@onready var world: Node3D = $World
+## Battle-only Camera2D. Lobby/login must NEVER make this current.
+@onready var battle_camera: Camera2D = $Camera2D
+@onready var world: Node2D = $World
 @onready var grid: ZZGridView = $World/Grid
-@onready var units: Node3D = $World/Units
+@onready var units: Node2D = $World/Units
 @onready var ui: ZZAppUI = $UI
 @onready var ws: ZZWSClient = $WSClient
 @onready var battle: ZZBattleController = $BattleController
 
 var _panning := false
 var _pan_last_screen := Vector2.ZERO
-var _focus := Vector3.ZERO
-## Battle-only 3D environment (charcoal void). Detached outside battle.
-var _battle_world_env: WorldEnvironment
-var _battle_environment: Environment
+var _focus := Vector2.ZERO
 
 
 func _ready() -> void:
 	_apply_window_fill()
-	_ensure_environment()
+	RenderingServer.set_default_clear_color(Color(0.11, 0.10, 0.09))
 	battle.setup(ws, grid, units)
 	_setup_battle_camera()
 	_fit_camera_to_map()
@@ -95,6 +84,7 @@ func _ready() -> void:
 	battle.fire_mode_changed.connect(func(_mode: String):
 		_refresh_fire_mode_hint()
 	)
+	battle.enemy_dossier_changed.connect(_on_enemy_dossier_changed)
 
 	ui.continue_pressed.connect(_on_continue)
 	ui.find_match_pressed.connect(_on_find_match)
@@ -135,80 +125,20 @@ func _apply_window_fill() -> void:
 	w.content_scale_size = Vector2i(1280, 720)
 
 
-func _ensure_environment() -> void:
-	## Build battle Environment once; attach only while in battle so lobby/login stay untouched.
-	if _battle_environment == null:
-		var env := Environment.new()
-		env.background_mode = Environment.BG_COLOR
-		# Soft charcoal void — pure black cuts the eye around the map.
-		env.background_color = Color(0.11, 0.10, 0.09)
-		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-		env.ambient_light_color = Color(0.68, 0.64, 0.58)
-		env.ambient_light_energy = 0.62
-		env.fog_enabled = false
-		env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-		env.ssao_enabled = true
-		env.ssao_radius = 1.2
-		env.ssao_intensity = 0.55
-		_battle_environment = env
-	if has_node("WorldEnvironment"):
-		_battle_world_env = $WorldEnvironment
-	else:
-		_battle_world_env = WorldEnvironment.new()
-		_battle_world_env.name = "WorldEnvironment"
-		add_child(_battle_world_env)
-	# Inactive outside battle — no shared clear color with lobby/login.
-	_battle_world_env.environment = null
-	if has_node("DirectionalLight3D"):
-		var sun: DirectionalLight3D = $DirectionalLight3D
-		sun.light_color = Color(1.0, 0.94, 0.82)
-		sun.light_energy = 1.25
-		sun.shadow_enabled = true
-		sun.shadow_opacity = 0.7
-		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
-	_ensure_battle_fill_light()
-
-
-func _ensure_battle_fill_light() -> void:
-	## Soft fill + cool rim so PBR reads like Tripo/Blender studio light (not flat sun).
-	var fill := get_node_or_null("FillLight3D") as DirectionalLight3D
-	if fill == null:
-		fill = DirectionalLight3D.new()
-		fill.name = "FillLight3D"
-		add_child(fill)
-	fill.rotation_degrees = Vector3(-25, -130, 0)
-	fill.light_color = Color(0.72, 0.78, 0.92)
-	fill.light_energy = 0.45
-	fill.shadow_enabled = false
-	var rim := get_node_or_null("RimLight3D") as DirectionalLight3D
-	if rim == null:
-		rim = DirectionalLight3D.new()
-		rim.name = "RimLight3D"
-		add_child(rim)
-	rim.rotation_degrees = Vector3(-10, 160, 0)
-	rim.light_color = Color(0.95, 0.9, 0.85)
-	rim.light_energy = 0.35
-	rim.shadow_enabled = false
-
-
 func _set_battle_view_active(active: bool) -> void:
-	## Single switch: battle camera + void env + world. Off = pure 2D lobby/login.
+	## Battle Camera2D + world. Off = lobby/login (UI only).
 	world.visible = active
-	if _battle_world_env != null:
-		_battle_world_env.environment = _battle_environment if active else null
+	battle_camera.enabled = active
 	if active:
 		battle_camera.make_current()
 	else:
-		battle_camera.current = false
+		battle_camera.enabled = false
 
 
 func _setup_battle_camera() -> void:
-	battle_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	battle_camera.size = ORTHO_SIZE_MIN
-	battle_camera.near = 0.05
-	battle_camera.far = 200.0
-	battle_camera.rotation_degrees = Vector3(CAM_PITCH_DEG, CAM_YAW_DEG, 0.0)
-	battle_camera.current = false
+	battle_camera.enabled = false
+	battle_camera.zoom = Vector2(ZOOM_MAX, ZOOM_MAX)
+	battle_camera.position = Vector2.ZERO
 
 
 func _on_continue(nick: String) -> void:
@@ -269,64 +199,61 @@ func _on_viewport_size_changed() -> void:
 
 
 func _fit_camera_to_map() -> void:
-	battle_camera.size = ORTHO_SIZE_MIN
+	battle_camera.zoom = Vector2(ZOOM_MAX, ZOOM_MAX)
 	var center := grid.map_center()
 	var player := grid.grid_to_world(battle.local_pos.x, battle.local_pos.y)
 	_focus = player.lerp(center, 0.28)
-	_focus.y = 0.0
-	_focus += Vector3.RIGHT * minf(grid.map_extents().x * 0.06, 2.5)
+	_focus.x += minf(grid.map_extents().x * 0.06, 80.0)
 	_clamp_focus()
 	_apply_camera_from_focus()
 
 
 func _ui_to_viewport(ui_pos: Vector2) -> Vector2:
-	## Canvas Control → то же пространство, что Camera3D.project_ray / unproject.
-	## canvas_transform учитывает stretch canvas_items (окно и fullscreen).
-	var xf := get_viewport().get_canvas_transform()
-	return xf.affine_inverse() * ui_pos
+	return get_viewport().get_canvas_transform().affine_inverse() * ui_pos
 
 
-func _chat_band_top_y() -> float:
-	## Реальный верх полосы чата/игроков (get_global_rect), в coords камеры.
+func _viewport_to_ui(vp_pos: Vector2) -> Vector2:
+	return get_viewport().get_canvas_transform() * vp_pos
+
+
+func _on_enemy_dossier_changed(payload: Dictionary) -> void:
+	if payload.is_empty() or not payload.has("player"):
+		ui.hide_enemy_dossier()
+		return
+	var pd: Variant = payload.get("player", {})
+	if typeof(pd) != TYPE_DICTIONARY or (pd as Dictionary).is_empty():
+		ui.hide_enemy_dossier()
+		return
+	var world_v: Variant = payload.get("world_pos", Vector2.ZERO)
+	var world_pos: Vector2 = world_v if typeof(world_v) == TYPE_VECTOR2 else Vector2.ZERO
+	var canvas_anchor := _viewport_to_ui(world_pos)
+	var shooter_v: Variant = payload.get("shooter_world_pos", world_pos)
+	var shooter_world: Vector2 = shooter_v if typeof(shooter_v) == TYPE_VECTOR2 else world_pos
+	var canvas_shooter := _viewport_to_ui(shooter_world)
+	ui.show_enemy_dossier(pd as Dictionary, canvas_anchor, canvas_shooter)
+
+
+func _hud_band_top_y() -> float:
 	var vp := get_viewport().get_visible_rect()
-	var top_ui := INF
-	var found := false
-	if ui != null and ui.chat_dock != null and ui.chat_dock.visible:
-		top_ui = minf(top_ui, ui.chat_dock.get_global_rect().position.y)
-		found = true
-	if not found:
-		return vp.position.y + vp.size.y * (1.0 - CHAT_BOTTOM_FRAC)
-	return _ui_to_viewport(Vector2(0.0, top_ui)).y
+	if ui != null and ui.char_dock != null and ui.char_dock.visible:
+		var top_ui := ui.char_dock.get_global_rect().position.y
+		return _ui_to_viewport(Vector2(0.0, top_ui)).y
+	return vp.position.y + vp.size.y * (1.0 - HUD_BOTTOM_FRAC)
 
 
-func _chat_strip_top_y() -> float:
-	## Низ playable: верх чата минус небольшой зазор (карта не под UI).
-	return _chat_band_top_y() - CHAT_PAD_PX
-
-
-func _chat_bottom_frac() -> float:
-	var vp := get_viewport().get_visible_rect()
-	if vp.size.y < 1.0:
-		return CHAT_BOTTOM_FRAC
-	var reserved := (vp.position.y + vp.size.y) - _chat_strip_top_y()
-	# Compact corner chat (~150px) — don't reserve a full HUD strip.
-	return clampf(reserved / vp.size.y, 0.10, 0.28)
+func _hud_strip_top_y() -> float:
+	return _hud_band_top_y() - HUD_PAD_PX
 
 
 func _apply_camera_from_focus() -> void:
-	# Fixed Fallout-like angle: place camera along -forward from focus.
-	var basis := Basis.from_euler(Vector3(deg_to_rad(CAM_PITCH_DEG), deg_to_rad(CAM_YAW_DEG), 0.0))
-	var forward := -basis.z.normalized()
-	# Shift look-target toward screen-down so the playable map sits above the chat HUD.
-	var screen_up := basis.y
-	screen_up.y = 0.0
-	var focus_view := _focus
-	var chat_frac := _chat_bottom_frac()
-	if screen_up.length_squared() > 0.0001:
-		screen_up = screen_up.normalized()
-		focus_view -= screen_up * (battle_camera.size * chat_frac)
-	battle_camera.global_position = focus_view - forward * CAM_HEIGHT
-	battle_camera.rotation_degrees = Vector3(CAM_PITCH_DEG, CAM_YAW_DEG, 0.0)
+	## Shift focus up so map sits above CharDock.
+	var hud_frac := 0.18
+	var vp := get_viewport().get_visible_rect()
+	if vp.size.y > 1.0:
+		var reserved := (vp.position.y + vp.size.y) - _hud_strip_top_y()
+		hud_frac = clampf(reserved / vp.size.y, 0.12, 0.22)
+	var half_h := (vp.size.y * 0.5) / maxf(battle_camera.zoom.y, 0.01)
+	battle_camera.position = _focus + Vector2(0.0, half_h * hud_frac)
 
 
 func _process(delta: float) -> void:
@@ -342,7 +269,7 @@ func _process(delta: float) -> void:
 	if Input.is_action_pressed("ui_down") or Input.is_key_pressed(KEY_S):
 		dir.y += 1.0
 	if dir != Vector2.ZERO:
-		_pan_focus(dir.normalized() * PAN_KEY_SPEED * delta * (battle_camera.size / ORTHO_SIZE_MIN))
+		_focus += dir.normalized() * PAN_KEY_SPEED * delta / maxf(battle_camera.zoom.x, 0.01)
 		_clamp_focus()
 		_apply_camera_from_focus()
 
@@ -362,147 +289,48 @@ func _unhandled_input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 			return
 		if mb.pressed and mb.button_index == MOUSE_BUTTON_WHEEL_UP:
-			_zoom(1.0 / (1.0 + ZOOM_STEP))
+			_zoom(1.0 + ZOOM_STEP)
 			get_viewport().set_input_as_handled()
 			return
 		if mb.pressed and mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_zoom(1.0 + ZOOM_STEP)
+			_zoom(1.0 / (1.0 + ZOOM_STEP))
 			get_viewport().set_input_as_handled()
 			return
 	if event is InputEventMouseMotion and _panning:
 		var mm := event as InputEventMouseMotion
 		var delta_screen := mm.position - _pan_last_screen
 		_pan_last_screen = mm.position
-		# Drag map with cursor: screen right → world along camera right, screen up → along camera "up" on XZ.
-		var right := battle_camera.global_transform.basis.x
-		var up := battle_camera.global_transform.basis.y
-		right.y = 0.0
-		up.y = 0.0
-		if right.length_squared() > 0.0001:
-			right = right.normalized()
-		if up.length_squared() > 0.0001:
-			up = up.normalized()
-		var scale := battle_camera.size / maxf(get_viewport().get_visible_rect().size.y, 1.0)
-		_focus -= right * delta_screen.x * scale
-		_focus += up * delta_screen.y * scale
+		_focus -= delta_screen / maxf(battle_camera.zoom.x, 0.01)
 		_clamp_focus()
 		_apply_camera_from_focus()
 		get_viewport().set_input_as_handled()
 
 
-func _pan_focus(delta_xz: Vector2) -> void:
-	var right := battle_camera.global_transform.basis.x
-	var forward := -battle_camera.global_transform.basis.z
-	right.y = 0.0
-	forward.y = 0.0
-	if right.length_squared() > 0.0001:
-		right = right.normalized()
-	if forward.length_squared() > 0.0001:
-		forward = forward.normalized()
-	# WASD: A/D along right, W/S along forward on ground.
-	_focus += right * delta_xz.x + forward * (-delta_xz.y)
-
-
 func _zoom(factor: float) -> void:
-	battle_camera.size = clampf(battle_camera.size * factor, ORTHO_SIZE_MIN, ORTHO_SIZE_MAX)
+	var z := clampf(battle_camera.zoom.x * factor, ZOOM_MIN, ZOOM_MAX)
+	battle_camera.zoom = Vector2(z, z)
 	_clamp_focus()
 	_apply_camera_from_focus()
 
 
-func _ground_at_screen(screen_pos: Vector2) -> Vector3:
-	var from := battle_camera.project_ray_origin(screen_pos)
-	var dir := battle_camera.project_ray_normal(screen_pos)
-	if absf(dir.y) < 0.0001:
-		return Vector3(from.x, 0.0, from.z)
-	var t := (0.0 - from.y) / dir.y
-	return from + dir * t
-
-
-func _map_dirt_half_ext() -> Vector3:
-	## Half-size of the visible dirt bed (plane = ext * 2.02).
-	var e := grid.map_extents()
-	return Vector3(e.x * 1.01, 0.0, e.z * 1.01)
-
-
-func _map_dirt_south_z() -> float:
-	return grid.map_center().z + _map_dirt_half_ext().z
-
-
-func _map_dirt_north_z() -> float:
-	return grid.map_center().z - _map_dirt_half_ext().z
-
-
-func _map_dirt_west_x() -> float:
-	return grid.map_center().x - _map_dirt_half_ext().x
-
-
-func _map_dirt_east_x() -> float:
-	return grid.map_center().x + _map_dirt_half_ext().x
-
-
 func _clamp_focus() -> void:
-	## Упоры (зум не меняем):
-	## вертикаль — чат/верх; горизонталь — центр если карта уже экрана, иначе void ≤ SIDE_VOID.
-	## Считаем по земле (лучи); UI→viewport через _ui_to_viewport.
-	_focus.y = 0.0
-	var vp := get_viewport().get_visible_rect()
-	var mid_x := vp.position.x + vp.size.x * 0.5
-	var chat_limit_y := _chat_strip_top_y()
-	var top_limit_y := vp.position.y + TOP_VOID_MAX_PX
-	var mid_y := (vp.position.y + chat_limit_y) * 0.5
-	var left_x := vp.position.x
-	var right_x := vp.position.x + vp.size.x
-	var basis := Basis.from_euler(Vector3(deg_to_rad(CAM_PITCH_DEG), deg_to_rad(CAM_YAW_DEG), 0.0))
-	var screen_up := basis.y
-	screen_up.y = 0.0
-	var screen_right := basis.x
-	screen_right.y = 0.0
-	if screen_up.length_squared() < 0.0001 or screen_right.length_squared() < 0.0001:
-		return
-	screen_up = screen_up.normalized()
-	screen_right = screen_right.normalized()
-	var map_south_z := _map_dirt_south_z()
-	var map_north_z := _map_dirt_north_z()
-	var map_west_x := _map_dirt_west_x()
-	var map_east_x := _map_dirt_east_x()
-	var map_w := map_east_x - map_west_x
-	var map_cx := grid.map_center().x
-	for _i in 12:
-		_apply_camera_from_focus()
-		var dx := 0.0
-		var dz := 0.0
-		# --- вертикаль ---
-		var z_chat := _ground_at_screen(Vector2(mid_x, chat_limit_y)).z
-		var excess_south := z_chat - map_south_z
-		if excess_south > 0.02:
-			dz += excess_south
-		var z_top := _ground_at_screen(Vector2(mid_x, top_limit_y)).z
-		var excess_north := map_north_z - z_top
-		if excess_north > 0.02:
-			dz -= excess_north
-		# --- горизонталь ---
-		var x_view_l := _ground_at_screen(Vector2(left_x, mid_y)).x
-		var x_view_r := _ground_at_screen(Vector2(right_x, mid_y)).x
-		var view_w := absf(x_view_r - x_view_l)
-		if view_w >= map_w - 0.05:
-			# Карта уже экрана — только центр, сдвиг влево/вправо запрещён.
-			var view_cx := (x_view_l + x_view_r) * 0.5
-			dx = map_cx - view_cx
-		else:
-			# Карта шире — void у каждого края ≤ SIDE_VOID_MAX_PX.
-			var x_lim_l := _ground_at_screen(Vector2(left_x + SIDE_VOID_MAX_PX, mid_y)).x
-			var excess_west := map_west_x - x_lim_l
-			if excess_west > 0.02:
-				dx += excess_west # карта уехала вправо → взгляд восточнее
-			var x_lim_r := _ground_at_screen(Vector2(right_x - SIDE_VOID_MAX_PX, mid_y)).x
-			var excess_east := x_lim_r - map_east_x
-			if excess_east > 0.02:
-				dx -= excess_east # карта уехала влево → взгляд западнее
-		if absf(dx) <= 0.02 and absf(dz) <= 0.02:
-			break
-		_focus += screen_right * dx + screen_up * dz
-		_focus.y = 0.0
-	_focus.y = 0.0
+	## Keep map edges within void limits vs viewport / CharDock.
+	var center := grid.map_center()
+	var ext := grid.map_extents()
+	var vp := get_viewport().get_visible_rect().size
+	var half := Vector2(vp.x, vp.y) * 0.5 / maxf(battle_camera.zoom.x, 0.01)
+	var min_x := center.x - ext.x + half.x - SIDE_VOID_MAX_PX
+	var max_x := center.x + ext.x - half.x + SIDE_VOID_MAX_PX
+	var min_y := center.y - ext.y + half.y - TOP_VOID_MAX_PX
+	var max_y := center.y + ext.y - half.y + 40.0
+	if min_x > max_x:
+		_focus.x = center.x
+	else:
+		_focus.x = clampf(_focus.x, min_x, max_x)
+	if min_y > max_y:
+		_focus.y = center.y
+	else:
+		_focus.y = clampf(_focus.y, min_y, max_y)
 
 
 func _refresh_quick_bar() -> void:

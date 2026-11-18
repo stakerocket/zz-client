@@ -2,24 +2,20 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://wjb5vm10pqih"
-path.s3tc="res://.godot/imported/man_adventurer+character+3d+model_Clone1_basecolor.jpg-bd9639e2860f8b87b2121456fd273991.s3tc.ctex"
+uid="uid://ckbwuwkdcwojl"
+path="res://.godot/imported/stalker_death_64.png-9f65f78562d74dbc375267b85c0d3c01.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
-"vram_texture": true
-}
-generator_parameters={
-"md5": "64eda42720c49e047565e7620d42970c"
+"vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/units/man_adventurer+character+3d+model_Clone1_basecolor.jpg"
-dest_files=["res://.godot/imported/man_adventurer+character+3d+model_Clone1_basecolor.jpg-bd9639e2860f8b87b2121456fd273991.s3tc.ctex"]
+source_file="res://assets/units/stalker_death_64.png"
+dest_files=["res://.godot/imported/stalker_death_64.png-9f65f78562d74dbc375267b85c0d3c01.ctex"]
 
 [params]
 
-compress/mode=2
+compress/mode=0
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -27,7 +23,7 @@ compress/rdo_quality_loss=0.0
 compress/hdr_compression=1
 compress/normal_map=0
 compress/channel_pack=0
-mipmaps/generate=true
+mipmaps/generate=false
 mipmaps/limit=-1
 roughness/mode=0
 roughness/src_normal=""
@@ -41,4 +37,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=0
+detect_3d/compress_to=1
