@@ -5,11 +5,13 @@ class_name ZZGridView
 
 static var GRID_COLS := 60
 static var GRID_ROWS := 45
-## Pixel spacing: width between flat centers; row pitch ≈ half for iso feel.
+## Pointy-top odd-r spacing (foreshortened ~2:1). Do NOT derive from square art —
+## that stretches hexes and opens gaps. Ground art is scaled to the map AABB.
 const HEX_W := 56.0
 const HEX_ROW := 28.0
 const TILE_W := 56
-const TILE_H := 32
+## face height ≈ HEX_ROW / 0.75 so wash/outline share edges (no gap, only rim)
+const TILE_H := 38
 
 signal tile_clicked(grid_pos: Vector2i)
 signal tile_hovered(grid_pos: Vector2i)
@@ -32,6 +34,7 @@ var _enemy_cells: Array = []
 var unit_cell_pick: Callable
 
 var _floor: Node2D
+var _chunk_root: Node2D
 var _overlay: Node2D
 var _outlines: Node2D
 var _walls_root: Node2D
@@ -47,22 +50,12 @@ var _tex_enemy: ImageTexture
 var _tex_sand: ImageTexture
 var _tex_barrier: ImageTexture
 var _tex_ruin: ImageTexture
-var _tile_depth := 0
 var _built := false
+var _chunk_placements: Array = [] ## server map.chunks; when non-empty, no per-hex floor
 
 
 func _ready() -> void:
-	_tile_depth = ZZPixelArt.hex_tile_depth()
-	_tex_tiles = [
-		ZZPixelArt.hex_tile_variant("dirt", 1, TILE_W, TILE_H),
-		ZZPixelArt.hex_tile_variant("dirt", 2, TILE_W, TILE_H),
-		ZZPixelArt.hex_tile_variant("cracked", 3, TILE_W, TILE_H),
-		ZZPixelArt.hex_tile_variant("cracked", 4, TILE_W, TILE_H),
-		ZZPixelArt.hex_tile_variant("grass", 5, TILE_W, TILE_H),
-		ZZPixelArt.hex_tile_variant("grass", 6, TILE_W, TILE_H),
-		ZZPixelArt.hex_tile_variant("rubble", 7, TILE_W, TILE_H),
-		ZZPixelArt.hex_tile_variant("scorched", 8, TILE_W, TILE_H),
-	]
+	_tex_tiles = _load_hex_textures()
 	_tex_wash_reach = ZZPixelArt.hex_wash(TILE_W, TILE_H, Color(0.55, 0.78, 0.42, 0.28))
 	_tex_wash_range = ZZPixelArt.hex_wash(TILE_W, TILE_H, Color(0.85, 0.45, 0.38, 0.30))
 	_tex_wash_path = ZZPixelArt.hex_wash(TILE_W, TILE_H, Color(0.55, 0.82, 0.45, 0.45))
@@ -73,6 +66,10 @@ func _ready() -> void:
 	_tex_barrier = ZZPixelArt.cover_half() ## half — concrete blocks
 	_tex_ruin = ZZPixelArt.cover_window() ## window — broken wall + grate
 
+	_chunk_root = Node2D.new()
+	_chunk_root.name = "ChunkGround"
+	_chunk_root.z_index = 0
+	add_child(_chunk_root)
 	_floor = Node2D.new()
 	_floor.name = "Floor"
 	_floor.z_index = 0
@@ -145,7 +142,20 @@ func set_map_size(cols: int, rows: int) -> void:
 	GRID_COLS = c
 	GRID_ROWS = r
 	_rebuild_floor()
+	_rebuild_chunk_grounds()
 	_rebuild_walls()
+
+
+func set_chunk_grounds(chunks: Array) -> void:
+	_chunk_placements = chunks.duplicate()
+	_rebuild_chunk_grounds()
+	_rebuild_floor()
+
+
+func clear_chunk_grounds() -> void:
+	_chunk_placements.clear()
+	_rebuild_chunk_grounds()
+	_rebuild_floor()
 
 
 func map_center() -> Vector2:
@@ -307,22 +317,87 @@ func _tile_for_cell(col: int, row: int) -> Texture2D:
 	return _tex_tiles[idx] as Texture2D
 
 
+func _load_hex_textures() -> Array:
+	## Prefer photo crops; fall back to flat procedural variants.
+	var kinds := ["dirt", "dirt", "cracked", "cracked", "grass", "grass", "rubble", "scorched"]
+	var paths: Array = ZZPixelArt.hex_tile_paths()
+	var out: Array = []
+	for i in range(paths.size()):
+		var tex: Texture2D = ZZPixelArt.hex_tile_from_file(str(paths[i]))
+		if tex == null:
+			tex = ZZPixelArt.hex_tile_variant(str(kinds[i]), i + 1, TILE_W, TILE_H)
+		out.append(tex)
+	return out
+
 func _rebuild_floor() -> void:
 	if _floor == null:
 		return
 	for c in _floor.get_children():
 		c.queue_free()
-	var y_fix := float(_tile_depth) * 0.5
+	## Chunk ground from server map — skip per-hex microfloor.
+	if not _chunk_placements.is_empty():
+		return
 	for row in GRID_ROWS:
 		for col in GRID_COLS:
 			var spr := Sprite2D.new()
 			spr.texture = _tile_for_cell(col, row)
 			spr.centered = true
-			## Face center stays on grid point; slab thickness hangs below.
-			spr.position = grid_to_world(col, row) + Vector2(0.0, y_fix)
+			spr.position = grid_to_world(col, row)
 			spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 			_floor.add_child(spr)
 
+
+func _rebuild_chunk_grounds() -> void:
+	if _chunk_root == null:
+		return
+	for c in _chunk_root.get_children():
+		c.queue_free()
+	for entry in _chunk_placements:
+		if typeof(entry) != TYPE_DICTIONARY:
+			continue
+		var cd: Dictionary = entry
+		var asset := str(cd.get("asset", cd.get("id", "")))
+		var tex: Texture2D = ZZMapManager.load_chunk_texture(asset)
+		if tex == null:
+			## Fallback: tinted rect so missing art is obvious in-editor.
+			tex = _make_chunk_placeholder(
+				int(cd.get("w", 1)),
+				int(cd.get("h", 1)),
+				asset
+			)
+		var spr := Sprite2D.new()
+		spr.texture = tex
+		spr.centered = false
+		spr.position = ZZMapManager.chunk_origin_world(
+			self, int(cd.get("ox", 0)), int(cd.get("oy", 0))
+		)
+		spr.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+		## Fit ground to hex AABB (art aspect may differ; hex pitch stays correct).
+		var want := ZZMapManager.chunk_pixel_size(int(cd.get("w", 1)), int(cd.get("h", 1)))
+		var tw := maxi(1, tex.get_width())
+		var th := maxi(1, tex.get_height())
+		spr.scale = Vector2(want.x / float(tw), want.y / float(th))
+		_chunk_root.add_child(spr)
+
+
+func _make_chunk_placeholder(w: int, h: int, seed_s: String) -> ImageTexture:
+	var sz := ZZMapManager.chunk_pixel_size(maxi(1, w), maxi(1, h))
+	var iw := maxi(8, int(sz.x))
+	var ih := maxi(8, int(sz.y))
+	var img := Image.create(iw, ih, false, Image.FORMAT_RGBA8)
+	var hsh: int = absi(seed_s.hash())
+	var base := Color(
+		0.28 + float(hsh % 40) / 200.0,
+		0.24 + float((hsh / 7) % 40) / 220.0,
+		0.18 + float((hsh / 13) % 30) / 200.0,
+		1.0
+	)
+	img.fill(base)
+	for y in range(0, ih, 8):
+		for x in range(0, iw, 8):
+			if ((x / 8) + (y / 8) + hsh) % 5 == 0:
+				img.set_pixel(mini(x, iw - 1), mini(y, ih - 1), base.lightened(0.08))
+	return ImageTexture.create_from_image(img)
 
 func _rebuild_overlay() -> void:
 	if _overlay == null:

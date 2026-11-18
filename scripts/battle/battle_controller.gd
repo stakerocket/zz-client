@@ -1542,6 +1542,11 @@ func _apply_state(state: Variant, reset_queue: bool, snap_positions: bool) -> vo
 		return
 	var st: Dictionary = state
 	_apply_map_size_from_state(st)
+	if st.has("map"):
+		ZZMapManager.apply_map_to_grid(grid, st.get("map", {}))
+	elif st.has("walls"):
+		## Legacy payload without map: keep microfloor.
+		grid.clear_chunk_grounds()
 	if st.has("rules"):
 		_apply_combat_rules(st.get("rules", {}))
 	if st.has("turn"):

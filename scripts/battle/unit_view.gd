@@ -411,14 +411,8 @@ func _refresh_sprite() -> void:
 		var tex := _stalker_tex(pose, frame)
 		if tex != null:
 			_sprite.texture = tex
-			## Light team tint so allies/enemies differ without recoloring camo.
-			var tint := Color(1, 1, 1)
-			if color.b > color.r + 0.1:
-				tint = Color(0.85, 0.92, 1.15)
-			elif color.r > color.b + 0.1:
-				tint = Color(1.15, 0.88, 0.85)
 			if not is_dying and not is_dead:
-				_sprite.modulate = tint
+				_sprite.modulate = Color.WHITE
 			return
 	var key := "%s_%s_%d_%d" % [pose, color.to_html(false), int(_armed), frame]
 	if not _tex_cache.has(key):

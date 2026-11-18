@@ -4,30 +4,50 @@ class_name ZZPixelArt
 ## Runtime placeholder pixel textures (no bake / no external tools).
 
 
-## Slab hex tile (face + thickness). `kind`: dirt | cracked | grass | rubble | scorched.
-## Face center is at (w/2, face_h/2); image taller by `depth` — place sprite with +Vector2(0, depth*0.5).
-const TILE_DEPTH := 7
+## Flat hex tile (no slab / no 3D thickness). Fill radius = 0.5 so neighbors flush.
+const TILE_DEPTH := 0
+const HEX_TEX_DIR := "res://assets/battle/hex/"
 
 
-static func hex_tile(w: int = 56, face_h: int = 32, fill: Color = Color(0.28, 0.26, 0.22), outline: Color = Color(0.08, 0.07, 0.06)) -> ImageTexture:
+static func hex_tile(w: int = 56, face_h: int = 38, fill: Color = Color(0.28, 0.26, 0.22), outline: Color = Color(0.08, 0.07, 0.06)) -> ImageTexture:
 	return hex_tile_variant("dirt", 0, w, face_h, fill, outline)
+
+
+static func hex_tile_from_file(path: String) -> Texture2D:
+	if path == "" or not ResourceLoader.exists(path):
+		return null
+	return load(path) as Texture2D
+
+
+static func hex_tile_paths() -> Array:
+	## Photo-cropped variants (preferred). Order matches grid_view weights.
+	return [
+		HEX_TEX_DIR + "hex_dirt_01.png",
+		HEX_TEX_DIR + "hex_dirt_02.png",
+		HEX_TEX_DIR + "hex_cracked_01.png",
+		HEX_TEX_DIR + "hex_cracked_02.png",
+		HEX_TEX_DIR + "hex_grass_01.png",
+		HEX_TEX_DIR + "hex_grass_02.png",
+		HEX_TEX_DIR + "hex_rubble_01.png",
+		HEX_TEX_DIR + "hex_scorched_01.png",
+	]
 
 
 static func hex_tile_variant(
 	kind: String = "dirt",
 	seed: int = 0,
 	w: int = 56,
-	face_h: int = 32,
+	face_h: int = 38,
 	fill: Color = Color(0.30, 0.28, 0.24),
 	outline: Color = Color(0.05, 0.045, 0.04)
 ) -> ImageTexture:
-	var depth := TILE_DEPTH
-	var img := Image.create(w, face_h + depth, false, Image.FORMAT_RGBA8)
+	## Procedural flat fallback when photo PNG missing.
+	var img := Image.create(w, face_h, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0, 0, 0, 0))
 	var cx := w * 0.5
 	var cy := face_h * 0.5
-	var rx := w * 0.48
-	var ry := face_h * 0.48
+	var rx := w * 0.5
+	var ry := face_h * 0.5
 	var pts: Array[Vector2] = _hex_points(cx, cy, rx, ry)
 	var base := fill
 	match kind:
@@ -41,34 +61,33 @@ static func hex_tile_variant(
 			base = Color(0.22, 0.20, 0.18)
 		_:
 			base = Color(0.30, 0.28, 0.24)
-	## Side faces (slab thickness) under SE / S / SW edges.
-	_draw_hex_slab(img, pts, depth, base.darkened(0.28), base.darkened(0.40), outline)
-	## Top face fill + noise
 	_fill_poly(img, pts, base)
 	_texture_hex_face(img, pts, kind, seed, base)
-	## Soft top highlight on NW edges
-	_stroke_poly(img, pts, Color(base.r + 0.08, base.g + 0.08, base.b + 0.06, 0.55))
 	_stroke_poly(img, pts, outline)
 	return ImageTexture.create_from_image(img)
 
 
 static func hex_tile_depth() -> int:
-	return TILE_DEPTH
+	return 0
 
 
-static func hex_outline(w: int = 56, h: int = 32, col: Color = Color(0.35, 0.85, 1.0)) -> ImageTexture:
+static func hex_outline(w: int = 56, h: int = 38, col: Color = Color(0.35, 0.85, 1.0)) -> ImageTexture:
 	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0, 0, 0, 0))
-	var pts: Array[Vector2] = _hex_points(w * 0.5, h * 0.5, w * 0.46, h * 0.46)
+	var pts: Array[Vector2] = _hex_points(w * 0.5, h * 0.5, w * 0.5, h * 0.5)
 	_stroke_poly(img, pts, col)
-	_stroke_poly(img, _hex_points(w * 0.5, h * 0.5, w * 0.40, h * 0.40), Color(col.r, col.g, col.b, 0.35))
+	_stroke_poly(img, _hex_points(w * 0.5, h * 0.5, w * 0.42, h * 0.42), Color(col.r, col.g, col.b, 0.35))
 	return ImageTexture.create_from_image(img)
 
 
-static func hex_wash(w: int = 56, h: int = 32, col: Color = Color(0.5, 0.8, 0.4, 0.35)) -> ImageTexture:
+static func hex_wash(w: int = 56, h: int = 38, col: Color = Color(0.5, 0.8, 0.4, 0.35)) -> ImageTexture:
 	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0, 0, 0, 0))
-	var pts: Array[Vector2] = _hex_points(w * 0.5, h * 0.5, w * 0.44, h * 0.44)
+	## Pointy-top verts at ±30°: flat-to-flat width = rx*√3. Match HEX_W (=w) so
+	## washes share edges. Slight oversize seals raster/sub-pixel seams (clipped by img).
+	var rx := float(w) / sqrt(3.0) * 1.02
+	var ry := float(h) * 0.5 * 1.02
+	var pts: Array[Vector2] = _hex_points(w * 0.5, h * 0.5, rx, ry)
 	_fill_poly(img, pts, col)
 	return ImageTexture.create_from_image(img)
 
