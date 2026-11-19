@@ -4,10 +4,11 @@ class_name ZZUnitView
 const MOVE_DURATION := 0.34
 ## Run covers hexes 2× faster than walk (same AP timeline feel as 0.5 AP/hex).
 const MOVE_DURATION_RUN := MOVE_DURATION * 0.5
-const CAPSULE_HEIGHT := 2.25
-const CAPSULE_RADIUS := 0.38
+## World meters: native AABB Y ≈0.98 → MODEL_SCALE 1.837 ≈ 1.80 m tall.
+const CAPSULE_HEIGHT := 1.80
+const CAPSULE_RADIUS := 0.30
 const MODEL_SCENE := preload("res://assets/units/man.glb")
-const MODEL_SCALE := 2.5
+const MODEL_SCALE := 1.837
 const MODEL_YAW_OFFSET := 0.0
 const ANIM_IDLE := "idle"
 const ANIM_WALK := "walk"
@@ -17,14 +18,15 @@ const ANIM_CROUCH_RUN := "crouching_run"
 const ANIM_HIDE := "hiding"
 const ANIM_FIRE := "idle"
 const ANIM_DEATH := "death"
-const HP_BAR_W := 1.35
-const HP_BAR_H := 0.16
-const FONT_NICK := 70
+const HP_BAR_W := 0.90
+const HP_BAR_H := 0.107
+const FONT_NICK := 47
 const FONT_FLOAT := 96
 const FONT_AIM := FONT_FLOAT # chance popup same size/style as damage
 
 var player_id: String = ""
 var nick: String = ""
+var level: int = 0
 var hp: int = 100
 var max_hp: int = 100
 var color: Color = Color(0.3, 0.65, 0.95)
@@ -59,8 +61,6 @@ var _hp_fill: MeshInstance3D
 var _hp_bg_mesh: BoxMesh
 var _hp_fill_mesh: BoxMesh
 var _hp_fill_mat: StandardMaterial3D
-var _aim_root: Node3D
-var _aim_ring: MeshInstance3D
 var _mat: StandardMaterial3D
 var _alive_color: Color = Color(0.3, 0.65, 0.95)
 var _max_initialized: bool = false
@@ -86,26 +86,25 @@ func _ready() -> void:
 	# Screen-aligned UI (copies camera basis) — no Label3D billboard tilt.
 	_ui_root = Node3D.new()
 	_ui_root.name = "UnitUI"
-	_ui_root.position = Vector3(0, CAPSULE_HEIGHT + 0.78, 0)
+	_ui_root.position = Vector3(0, CAPSULE_HEIGHT + 0.50, 0)
 	add_child(_ui_root)
 
 	_label = Label3D.new()
 	_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 	_label.font_size = FONT_NICK
-	_label.outline_size = 14
-	_label.position = Vector3(0, 0.28, 0)
+	_label.outline_size = 9
+	_label.position = Vector3(0, 0.19, 0)
 	_label.render_priority = 8
 	_label.no_depth_test = true
 	_ui_root.add_child(_label)
 
 	_build_hp_bar()
-	_build_aim_reticle()
 
 	_aim_label = Label3D.new()
 	_aim_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 	_aim_label.font_size = FONT_AIM
 	_aim_label.outline_size = 16
-	_aim_label.position = Vector3(0, CAPSULE_HEIGHT + 1.7, 0)
+	_aim_label.position = Vector3(0, CAPSULE_HEIGHT + 1.15, 0)
 	_aim_label.visible = false
 	_aim_label.render_priority = 10
 	_aim_label.no_depth_test = true
@@ -484,57 +483,6 @@ func _build_hp_bar() -> void:
 	_hp_root.add_child(_hp_fill)
 
 
-func _make_aim_mat(col: Color) -> StandardMaterial3D:
-	var m := StandardMaterial3D.new()
-	m.albedo_color = col
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	# Draw on top of the body so the reticle is never occluded.
-	m.no_depth_test = true
-	m.render_priority = 12
-	return m
-
-
-func _build_aim_reticle() -> void:
-	_aim_root = Node3D.new()
-	_aim_root.name = "AimReticle"
-	_aim_root.visible = false
-	_aim_root.position = Vector3(0, CAPSULE_HEIGHT * 0.55, 0)
-	add_child(_aim_root)
-
-	_aim_ring = MeshInstance3D.new()
-	var torus := TorusMesh.new()
-	torus.inner_radius = 0.62
-	torus.outer_radius = 0.72
-	torus.rings = 12
-	torus.ring_segments = 28
-	_aim_ring.mesh = torus
-	# Torus lies in XZ by default; rotate so ring faces camera after look_at.
-	_aim_ring.rotation_degrees = Vector3(90, 0, 0)
-	_aim_ring.material_override = _make_aim_mat(Color(0.95, 0.3, 0.25, 0.95))
-	_aim_root.add_child(_aim_ring)
-
-	# Crosshair ticks (in aim_root local XY after look_at).
-	for i in 4:
-		var tick := MeshInstance3D.new()
-		var box := BoxMesh.new()
-		box.size = Vector3(0.08, 0.36, 0.08)
-		tick.mesh = box
-		tick.material_override = _make_aim_mat(Color(0.95, 0.3, 0.25, 0.95))
-		match i:
-			0:
-				tick.position = Vector3(0, 0.88, 0)
-			1:
-				tick.position = Vector3(0, -0.88, 0)
-			2:
-				tick.position = Vector3(0.88, 0, 0)
-				tick.rotation_degrees = Vector3(0, 0, 90)
-			3:
-				tick.position = Vector3(-0.88, 0, 0)
-				tick.rotation_degrees = Vector3(0, 0, 90)
-		_aim_root.add_child(tick)
-
-
 func _face_screen(node: Node3D, cam: Camera3D) -> void:
 	# Match camera orientation → UI stays level on screen (like reference plates).
 	node.global_basis = cam.global_basis
@@ -551,13 +499,6 @@ func _process(delta: float) -> void:
 		_face_screen(_ui_root, cam)
 	if _aim_label != null and _aim_label.visible:
 		_face_screen(_aim_label, cam)
-	if _aim_root != null and _aim_root.visible:
-		_face_screen(_aim_root, cam)
-		var to_cam := -cam.global_transform.basis.z
-		to_cam.y = 0.0
-		if to_cam.length_squared() > 0.0001:
-			to_cam = to_cam.normalized()
-			_aim_root.global_position = global_position + Vector3(0, CAPSULE_HEIGHT * 0.55, 0) + to_cam * 0.55
 
 
 func setup(id: String, player_nick: String, unit_color: Color) -> void:
@@ -567,6 +508,11 @@ func setup(id: String, player_nick: String, unit_color: Color) -> void:
 	_alive_color = unit_color
 	_refresh_label()
 	_refresh_hp_bar()
+
+
+func set_level(value: int) -> void:
+	level = maxi(0, value)
+	_refresh_label()
 
 
 func set_max_hp(value: int) -> void:
@@ -718,7 +664,7 @@ func _float_label(text: String, col: Color, x_off: float = 0.0, y_off: float = 0
 	lbl.font_size = FONT_FLOAT
 	lbl.outline_size = 18
 	lbl.modulate = col
-	lbl.position = Vector3(x_off, CAPSULE_HEIGHT + 1.38 + y_off, 0)
+	lbl.position = Vector3(x_off, CAPSULE_HEIGHT + 0.85 + y_off, 0)
 	lbl.render_priority = 16 + int(y_off * 10.0)
 	lbl.no_depth_test = true
 	add_child(lbl)
@@ -831,8 +777,8 @@ func _on_death_finished() -> void:
 		_hp_bg.visible = false
 	if _hp_fill:
 		_hp_fill.visible = false
-	if _aim_root:
-		_aim_root.visible = false
+	if _aim_label:
+		_aim_label.visible = false
 	_clear_overlay()
 
 
@@ -862,7 +808,11 @@ func _reset_alive_visual() -> void:
 
 
 func _refresh_label() -> void:
-	if _label:
+	if _label == null:
+		return
+	if level > 0:
+		_label.text = "%s [%d]" % [nick, level]
+	else:
 		_label.text = nick
 
 
@@ -892,11 +842,10 @@ func _refresh_hp_bar() -> void:
 
 
 func _refresh_aim_visual() -> void:
-	if _aim_label == null or _aim_root == null:
+	if _aim_label == null:
 		return
 	if _aim_chance == null or typeof(_aim_chance) != TYPE_DICTIONARY:
 		_aim_label.visible = false
-		_aim_root.visible = false
 		return
 	var info: Dictionary = _aim_chance
 	var text := "блок"
@@ -917,16 +866,6 @@ func _refresh_aim_visual() -> void:
 	_aim_label.text = text
 	_aim_label.modulate = col
 	_aim_label.visible = true
-	_aim_root.visible = true
-	# Recolor reticle
-	for c in _aim_root.get_children():
-		if c is MeshInstance3D:
-			var mi: MeshInstance3D = c
-			var m: StandardMaterial3D = mi.material_override
-			if m:
-				m.albedo_color = Color(col.r, col.g, col.b, 0.95)
-				m.no_depth_test = true
-				m.render_priority = 12
 
 
 func _apply_posture_visual() -> void:

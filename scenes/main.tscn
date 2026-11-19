@@ -413,9 +413,9 @@ corner_radius_bottom_left = 2
 script = ExtResource("1_main")
 
 [node name="Camera3D" type="Camera3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 0.573576, 0.819152, 0, -0.819152, 0.573576, 25, 28, 45)
+transform = Transform3D(1, 0, 0, 0, 0.894427, 0.447214, 0, -0.447214, 0.894427, 25, 28, 45)
 projection = 1
-size = 22.0
+size = 8.0
 current = true
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]

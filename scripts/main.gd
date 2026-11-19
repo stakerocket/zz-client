@@ -1,13 +1,18 @@
 ﻿extends Node
 
-const ORTHO_SIZE_MIN := 22.0 # closest — default battle zoom (no auto-fit)
-const ORTHO_SIZE_MAX := 40.0 # farthest — beyond this the map becomes a postage stamp
+## Fallback zoom bounds until viewport+tex sizes are known (_refresh_ortho_zoom_limits).
+## Default/closest = ground texel≈screen pixel (pan for the rest); wheel zooms out only from there.
+var _ortho_size_min := 8.0
+var _ortho_size_max := 28.0
 const ZOOM_STEP := 0.08
 const PAN_KEY_SPEED := 18.0 # world units / sec
-const CAM_PITCH_DEG := -55.0
+## Classic 2:1 isometric: arctan(0.5) ≈ 26.565° (alt. geometric iso −30°).
+const CAM_PITCH_DEG := -26.565
 ## Yaw 0: map axes align with screen (rectangle). Non-zero yaw turns the field into a diamond.
 const CAM_YAW_DEG := 0.0
 const CAM_HEIGHT := 28.0
+## Max zoom-out: show whole dirt + small void (not postage-stamp further).
+const ORTHO_MAP_FIT_PAD := 1.08
 ## Fallback if chat dock rect is not ready yet.
 const CHAT_BOTTOM_FRAC := 0.28
 ## Extra gap above the real chat/players strip so the map does not sit under it.
@@ -100,6 +105,7 @@ func _ready() -> void:
 	ui.find_match_pressed.connect(_on_find_match)
 	ui.cancel_match_pressed.connect(_on_cancel_match)
 	battle.queue_left.connect(func(): ui.set_searching(false))
+	battle.enemy_dossier_changed.connect(_on_enemy_dossier_changed)
 	ui.end_turn_pressed.connect(battle.request_end_turn)
 	ui.undo_pressed.connect(battle.request_undo)
 	ui.posture_pressed.connect(battle.request_posture)
@@ -136,21 +142,21 @@ func _apply_window_fill() -> void:
 
 
 func _ensure_environment() -> void:
-	## Build battle Environment once; attach only while in battle so lobby/login stay untouched.
+	## Battle Environment — re-apply each boot so shadow tweaks stick (lobby stays untouched).
 	if _battle_environment == null:
-		var env := Environment.new()
-		env.background_mode = Environment.BG_COLOR
-		# Soft charcoal void — pure black cuts the eye around the map.
-		env.background_color = Color(0.11, 0.10, 0.09)
-		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-		env.ambient_light_color = Color(0.68, 0.64, 0.58)
-		env.ambient_light_energy = 0.62
-		env.fog_enabled = false
-		env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-		env.ssao_enabled = true
-		env.ssao_radius = 1.2
-		env.ssao_intensity = 0.55
-		_battle_environment = env
+		_battle_environment = Environment.new()
+	var env := _battle_environment
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = Color(0.11, 0.10, 0.09)
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	## Warm but dim — ~20% darker umbra than prior pass.
+	env.ambient_light_color = Color(0.62, 0.54, 0.44)
+	env.ambient_light_energy = 0.16
+	env.fog_enabled = false
+	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.ssao_enabled = true
+	env.ssao_radius = 1.4
+	env.ssao_intensity = 1.02
 	if has_node("WorldEnvironment"):
 		_battle_world_env = $WorldEnvironment
 	else:
@@ -162,23 +168,27 @@ func _ensure_environment() -> void:
 	if has_node("DirectionalLight3D"):
 		var sun: DirectionalLight3D = $DirectionalLight3D
 		sun.light_color = Color(1.0, 0.94, 0.82)
-		sun.light_energy = 1.25
+		sun.light_energy = 1.32
 		sun.shadow_enabled = true
-		sun.shadow_opacity = 0.7
-		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+		sun.shadow_opacity = 1.0
+		sun.shadow_blur = 2.0
+		sun.shadow_bias = 0.03
+		sun.shadow_normal_bias = 1.5
+		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+		sun.directional_shadow_blend_splits = true
 	_ensure_battle_fill_light()
 
 
 func _ensure_battle_fill_light() -> void:
-	## Soft fill + cool rim so PBR reads like Tripo/Blender studio light (not flat sun).
+	## Low warm fill — shade stays dark; a bit of dust color, not washout.
 	var fill := get_node_or_null("FillLight3D") as DirectionalLight3D
 	if fill == null:
 		fill = DirectionalLight3D.new()
 		fill.name = "FillLight3D"
 		add_child(fill)
 	fill.rotation_degrees = Vector3(-25, -130, 0)
-	fill.light_color = Color(0.72, 0.78, 0.92)
-	fill.light_energy = 0.45
+	fill.light_color = Color(0.78, 0.68, 0.55)
+	fill.light_energy = 0.16
 	fill.shadow_enabled = false
 	var rim := get_node_or_null("RimLight3D") as DirectionalLight3D
 	if rim == null:
@@ -187,7 +197,7 @@ func _ensure_battle_fill_light() -> void:
 		add_child(rim)
 	rim.rotation_degrees = Vector3(-10, 160, 0)
 	rim.light_color = Color(0.95, 0.9, 0.85)
-	rim.light_energy = 0.35
+	rim.light_energy = 0.14
 	rim.shadow_enabled = false
 
 
@@ -204,7 +214,8 @@ func _set_battle_view_active(active: bool) -> void:
 
 func _setup_battle_camera() -> void:
 	battle_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	battle_camera.size = ORTHO_SIZE_MIN
+	_refresh_ortho_zoom_limits()
+	battle_camera.size = _ortho_size_min
 	battle_camera.near = 0.05
 	battle_camera.far = 200.0
 	battle_camera.rotation_degrees = Vector3(CAM_PITCH_DEG, CAM_YAW_DEG, 0.0)
@@ -264,12 +275,20 @@ func _on_battle_started() -> void:
 func _on_viewport_size_changed() -> void:
 	if not world.visible or not battle.in_battle:
 		return
+	var was_1to1 := absf(battle_camera.size - _ortho_size_min) < 0.05
+	_refresh_ortho_zoom_limits()
+	if was_1to1:
+		battle_camera.size = _ortho_size_min
+	else:
+		battle_camera.size = clampf(battle_camera.size, _ortho_size_min, _ortho_size_max)
 	_clamp_focus()
 	_apply_camera_from_focus()
 
 
 func _fit_camera_to_map() -> void:
-	battle_camera.size = ORTHO_SIZE_MIN
+	## Start at texel≈pixel; pan WASD/MMB over the high-detail dirt.
+	_refresh_ortho_zoom_limits()
+	battle_camera.size = _ortho_size_min
 	var center := grid.map_center()
 	var player := grid.grid_to_world(battle.local_pos.x, battle.local_pos.y)
 	_focus = player.lerp(center, 0.28)
@@ -279,11 +298,58 @@ func _fit_camera_to_map() -> void:
 	_apply_camera_from_focus()
 
 
+func _refresh_ortho_zoom_limits() -> void:
+	## Ortho `size` = visible height in world units along camera up.
+	## 3D draws at real window pixels (canvas_items stretch only scales 2D UI).
+	## Yaw 0 → world X ↔ screen X: px_per_meter = win_h / size.
+	## 1:1: px_per_meter = texels_per_meter → size = win_h * plane_w / tex_w.
+	var win := get_window()
+	var win_size := Vector2(win.size) if win != null else get_viewport().get_visible_rect().size
+	var win_h := maxf(win_size.y, 1.0)
+	var win_w := maxf(win_size.x, 1.0)
+	var plane := grid.ground_plane_size()
+	var tex := grid.ground_texel_size()
+	var tex_w := maxi(tex.x, 1)
+	var plane_w := maxf(plane.x, 0.01)
+	_ortho_size_min = clampf(win_h * plane_w / float(tex_w), 2.0, 64.0)
+	## Farthest: fit full dirt (pitch foreshortens Z on screen).
+	var plane_d := maxf(plane.y, 0.01)
+	var pitch_sin := maxf(absf(sin(deg_to_rad(CAM_PITCH_DEG))), 0.2)
+	var fit_h := plane_d * pitch_sin * ORTHO_MAP_FIT_PAD
+	var fit_w := plane_w * ORTHO_MAP_FIT_PAD * (win_h / win_w)
+	_ortho_size_max = maxf(_ortho_size_min * 1.25, maxf(fit_h, fit_w))
+
+
 func _ui_to_viewport(ui_pos: Vector2) -> Vector2:
 	## Canvas Control → то же пространство, что Camera3D.project_ray / unproject.
 	## canvas_transform учитывает stretch canvas_items (окно и fullscreen).
 	var xf := get_viewport().get_canvas_transform()
 	return xf.affine_inverse() * ui_pos
+
+
+func _world_to_ui(world: Vector3) -> Vector2:
+	## 3D world → canvas coords for Control overlays (dossier).
+	if battle_camera == null:
+		return Vector2.ZERO
+	var vp_pos := battle_camera.unproject_position(world)
+	return get_viewport().get_canvas_transform() * vp_pos
+
+
+func _on_enemy_dossier_changed(payload: Dictionary) -> void:
+	if payload.is_empty() or not payload.has("player"):
+		ui.hide_enemy_dossier()
+		return
+	var pd: Variant = payload.get("player", {})
+	if typeof(pd) != TYPE_DICTIONARY or (pd as Dictionary).is_empty():
+		ui.hide_enemy_dossier()
+		return
+	var world_v: Variant = payload.get("world_pos", Vector3.ZERO)
+	var world_pos: Vector3 = world_v if typeof(world_v) == TYPE_VECTOR3 else Vector3.ZERO
+	var canvas_anchor := _world_to_ui(world_pos)
+	var shooter_v: Variant = payload.get("shooter_world_pos", world_pos)
+	var shooter_world: Vector3 = shooter_v if typeof(shooter_v) == TYPE_VECTOR3 else world_pos
+	var canvas_shooter := _world_to_ui(shooter_world)
+	ui.show_enemy_dossier(pd as Dictionary, canvas_anchor, canvas_shooter)
 
 
 func _chat_band_top_y() -> float:
@@ -342,7 +408,7 @@ func _process(delta: float) -> void:
 	if Input.is_action_pressed("ui_down") or Input.is_key_pressed(KEY_S):
 		dir.y += 1.0
 	if dir != Vector2.ZERO:
-		_pan_focus(dir.normalized() * PAN_KEY_SPEED * delta * (battle_camera.size / ORTHO_SIZE_MIN))
+		_pan_focus(dir.normalized() * PAN_KEY_SPEED * delta * (battle_camera.size / maxf(_ortho_size_min, 0.01)))
 		_clamp_focus()
 		_apply_camera_from_focus()
 
@@ -404,7 +470,7 @@ func _pan_focus(delta_xz: Vector2) -> void:
 
 
 func _zoom(factor: float) -> void:
-	battle_camera.size = clampf(battle_camera.size * factor, ORTHO_SIZE_MIN, ORTHO_SIZE_MAX)
+	battle_camera.size = clampf(battle_camera.size * factor, _ortho_size_min, _ortho_size_max)
 	_clamp_focus()
 	_apply_camera_from_focus()
 

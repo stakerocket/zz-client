@@ -37,6 +37,8 @@ signal queue_left
 signal rules_changed
 signal inventory_state_received(data: Dictionary)
 signal battle_inventory_opened(data: Dictionary)
+## Enemy hover dossier: payload {player, world_pos: Vector3, shooter_world_pos: Vector3} or {}.
+signal enemy_dossier_changed(payload: Dictionary)
 
 var ws: ZZWSClient
 var grid: ZZGridView
@@ -92,6 +94,10 @@ var _hover_path: Array = []
 var _hover_path_ap: int = 0
 var _hover_affordable_steps: int = 0
 var _end_turn_sent: bool = false
+## LCtrl: soft red wash for active weapon range.
+var _range_overlay_on: bool = false
+## Space toggle: hide cover props + dark wash on blocked hexes.
+var _obstacle_clear_on: bool = false
 
 var _colors := [
 	Color(0.30, 0.65, 0.95),
@@ -720,12 +726,17 @@ func _commit_end_turn() -> void:
 
 
 func _process(delta: float) -> void:
+	if in_battle:
+		_refresh_prop_occlusion()
+	else:
+		_set_range_overlay(false)
+		_set_obstacle_clear(false)
+		return
 	if _playing_events:
+		_set_range_overlay(false)
 		return
 	if not _resolve_queue.is_empty():
 		_pump_resolve_queue()
-		return
-	if not in_battle:
 		return
 	# Keep ticking after end_turn so the waiting player still sees remaining time.
 	if _deadline_left > 0.0:
@@ -735,6 +746,17 @@ func _process(delta: float) -> void:
 	if not _end_turn_sent and not input_locked and _deadline_left <= 0.0:
 		timer_changed.emit(0.0)
 		_commit_end_turn()
+	var typing := _is_text_input_focused()
+	var want_range := (
+		not input_locked
+		and not _end_turn_sent
+		and not typing
+		and Input.is_key_pressed(KEY_CTRL)
+	)
+	_set_range_overlay(want_range)
+	## Space clear-mode is toggle (handled in _unhandled_input); keep off while typing.
+	if typing and _obstacle_clear_on:
+		_set_obstacle_clear(false)
 
 
 func _on_message(data: Dictionary) -> void:
@@ -811,6 +833,8 @@ func _run_resolve(item: Dictionary) -> void:
 		_apply_state(data.get("state", {}), false, false)
 		_emit_room_nicks_from_state(data.get("state", {}))
 		_playing_events = false
+		## Reach was skipped while _playing_events; restore if still planning.
+		_refresh_reach_preview()
 		return
 	if kind == "state":
 		turn_deadline_ms = int(data.get("turn_deadline_ms", 30000))
@@ -829,6 +853,8 @@ func _run_resolve(item: Dictionary) -> void:
 		_set_locked(false)
 	_playing_events = false
 	_refresh_unit_outlines()
+	## _apply_state / _set_locked ran while _playing_events was still true → wash cleared.
+	_refresh_reach_preview()
 
 
 func _apply_battle_start(data: Dictionary) -> void:
@@ -1427,7 +1453,7 @@ func _unit_id_at_screen(screen_pos: Vector2) -> String:
 	var best_id := ""
 	var best_t := INF
 	var pick_r := ZZGridView.HEX_SIZE * 0.9
-	var pick_h := ZZUnitView.CAPSULE_HEIGHT * ZZUnitView.MODEL_SCALE * 0.55
+	var pick_h := ZZUnitView.CAPSULE_HEIGHT * 0.85
 	for pid in unit_nodes.keys():
 		var uv: ZZUnitView = unit_nodes[pid]
 		if uv == null or not is_instance_valid(uv) or uv.is_dead or uv.is_dying:
@@ -1593,6 +1619,11 @@ func _apply_state(state: Variant, reset_queue: bool, snap_positions: bool) -> vo
 		if posture == "":
 			posture = "stand"
 		uv.set_posture(posture)
+		## Level in nick for enemies only.
+		if pid != your_id:
+			uv.set_level(maxi(1, int(pd.get("level", 1))))
+		else:
+			uv.set_level(0)
 		if not uv.is_dead and not uv.is_dying and not uv.is_moving:
 			uv.snap_to(grid.grid_to_world(gx, gy))
 		if pid == your_id:
@@ -1626,6 +1657,7 @@ func _apply_state(state: Variant, reset_queue: bool, snap_positions: bool) -> vo
 		if is_instance_valid(orphan):
 			orphan.queue_free()
 	_refresh_unit_outlines()
+	_refresh_reach_preview()
 
 
 func _rewind_local_to_turn_start() -> void:
@@ -1640,6 +1672,7 @@ func _rewind_local_to_turn_start() -> void:
 	if grid != null:
 		grid.set_highlight(Vector2i(-1, -1))
 	_clear_hover_path()
+	_refresh_reach_preview()
 
 
 func clear_battle_visuals() -> void:
@@ -1655,10 +1688,15 @@ func clear_battle_visuals() -> void:
 		if is_instance_valid(uv):
 			uv.queue_free()
 	unit_nodes.clear()
+	_range_overlay_on = false
+	_obstacle_clear_on = false
 	if grid != null:
 		grid.set_highlight(Vector2i(-1, -1))
+		grid.clear_obstacle_clear()
 		grid.clear_walls()
 		grid.clear_unit_outlines()
+		grid.clear_reach_preview()
+		grid.clear_range_preview()
 	_clear_hover_path()
 	_clear_aim_previews()
 
@@ -1695,12 +1733,20 @@ func _set_locked(locked: bool) -> void:
 	if locked:
 		_clear_hover_path()
 		_clear_aim_previews()
+	_refresh_reach_preview()
 
 
 func _on_tile_hovered(g: Vector2i) -> void:
-	if input_locked or not in_battle or _playing_events:
+	if not in_battle or _playing_events:
 		_clear_hover_path()
 		_clear_aim_previews()
+		return
+	## After end_turn input is locked — still show dossier on enemy hover (no aim/path).
+	if input_locked:
+		_clear_hover_path()
+		_clear_aim_previews(false)
+		if not _try_show_enemy_dossier(g):
+			enemy_dossier_changed.emit({})
 		return
 	if _try_show_enemy_aim(g):
 		_clear_hover_path()
@@ -1709,19 +1755,18 @@ func _on_tile_hovered(g: Vector2i) -> void:
 	_update_path_preview(g)
 
 
-func _clear_aim_previews() -> void:
+func _clear_aim_previews(clear_dossier: bool = true) -> void:
 	for pid in unit_nodes.keys():
 		var uv: ZZUnitView = unit_nodes[pid]
 		if uv != null and is_instance_valid(uv):
 			uv.clear_aim_preview()
-	if grid != null:
-		grid.clear_aim_ray()
+	if clear_dossier:
+		enemy_dossier_changed.emit({})
 
 
-func _try_show_enemy_aim(g: Vector2i) -> bool:
+func _enemy_id_at(g: Vector2i) -> String:
 	if g.x < 0:
-		return false
-	var target_id := ""
+		return ""
 	for pid in players.keys():
 		if pid == your_id:
 			continue
@@ -1729,11 +1774,40 @@ func _try_show_enemy_aim(g: Vector2i) -> bool:
 		if int(pd.get("hp", 0)) <= 0:
 			continue
 		if int(pd.get("x", -1)) == g.x and int(pd.get("y", -1)) == g.y:
-			target_id = pid
-			break
+			return pid
+	return ""
+
+
+func _dossier_anchor(uv: ZZUnitView) -> Vector3:
+	return uv.global_position + Vector3(0, ZZUnitView.CAPSULE_HEIGHT * 0.55, 0)
+
+
+func _try_show_enemy_dossier(g: Vector2i) -> bool:
+	var target_id := _enemy_id_at(g)
 	if target_id == "":
 		return false
-	_clear_aim_previews()
+	var uv: ZZUnitView = unit_nodes.get(target_id)
+	if uv == null or not is_instance_valid(uv):
+		return true
+	var pd2: Dictionary = players.get(target_id, {})
+	var world_pos := _dossier_anchor(uv)
+	var shooter_pos := world_pos
+	var self_uv: ZZUnitView = unit_nodes.get(your_id)
+	if self_uv != null and is_instance_valid(self_uv):
+		shooter_pos = _dossier_anchor(self_uv)
+	enemy_dossier_changed.emit({
+		"player": pd2,
+		"world_pos": world_pos,
+		"shooter_world_pos": shooter_pos,
+	})
+	return true
+
+
+func _try_show_enemy_aim(g: Vector2i) -> bool:
+	var target_id := _enemy_id_at(g)
+	if target_id == "":
+		return false
+	_clear_aim_previews(false)
 	var uv: ZZUnitView = unit_nodes.get(target_id)
 	if uv == null or not is_instance_valid(uv):
 		return true
@@ -1760,13 +1834,14 @@ func _try_show_enemy_aim(g: Vector2i) -> bool:
 	elif fire_mode == "duplet":
 		fire_ap = int(_active_weapon_dict().get("duplet_ap", 0))
 	var can_shoot := can_fire_pose and fire_ap > 0 and local_ap >= fire_ap + rise_cost and not blocked
+	## Like 2d: chance label only — no aim ray / reticle.
 	uv.set_aim_preview({
 		"blocked": blocked,
 		"chance": float(outcome.get("chance", 0.0)),
 		"can_shoot": can_shoot,
 		"melee_reach": melee_reach,
 	})
-	grid.set_aim_ray(local_pos, Vector2i(tx, ty), ZZLos.weapon_range())
+	_try_show_enemy_dossier(g)
 	return true
 
 
@@ -1783,7 +1858,7 @@ func _occupied_keys_except_self() -> Dictionary:
 
 
 func _path_preview_steps() -> int:
-	# ×2 of max turn AP so full-budget paths + gray preview beyond current AP.
+	# Search horizon ×2 max AP so hover can target farther cells; draw only affordable prefix.
 	# Run: ~2 hexes per AP → horizon scales with 1/frac.
 	if local_posture == "run" and move_ap_run_frac > 0.0:
 		return maxi(1, int(ceil(float(max_ap) / move_ap_run_frac * 2.0)))
@@ -1800,12 +1875,114 @@ func _path_to(g: Vector2i) -> Dictionary:
 		step = 1
 	elif step <= 0:
 		return {"path": [], "ap": 0, "affordable_steps": 0}
-	# budget_ap = remaining AP (green/gray); max_steps = 2 × max_ap pool.
+	# budget_ap = remaining AP (affordable prefix); max_steps = 2 × max_ap pool.
 	var streak := _run_streak_in_queue() if local_posture == "run" else 0
 	return ZZPathfind.find_path(
 		local_pos, g, grid.walls_dict(), _occupied_keys_except_self(),
 		step, local_ap, ZZGridView.GRID_COLS, ZZGridView.GRID_ROWS, _path_preview_steps(), frac, streak
 	)
+
+
+func _refresh_reach_preview() -> void:
+	if grid == null:
+		return
+	if input_locked or not in_battle or _playing_events:
+		grid.clear_reach_preview()
+		return
+	if local_posture == "cover" or local_ap <= 0:
+		grid.clear_reach_preview()
+		return
+	var step := _move_cost_for(local_posture)
+	var frac := 0.0
+	if local_posture == "run":
+		frac = move_ap_run_frac
+		step = 1
+	elif step <= 0:
+		grid.clear_reach_preview()
+		return
+	var streak := _run_streak_in_queue() if local_posture == "run" else 0
+	var cells := ZZPathfind.reachable_cells(
+		local_pos, grid.walls_dict(), _occupied_keys_except_self(),
+		step, local_ap, ZZGridView.GRID_COLS, ZZGridView.GRID_ROWS, frac, streak
+	)
+	grid.set_reach_preview(cells)
+	if _range_overlay_on:
+		_refresh_range_preview()
+
+
+func _is_text_input_focused() -> bool:
+	var fo := get_viewport().gui_get_focus_owner()
+	return fo is LineEdit or fo is TextEdit
+
+
+func _refresh_prop_occlusion() -> void:
+	if grid == null:
+		return
+	var cam := get_viewport().get_camera_3d()
+	var feet: Array = []
+	for pid in unit_nodes.keys():
+		var uv: ZZUnitView = unit_nodes[pid]
+		if uv == null or not is_instance_valid(uv) or uv.is_dead or uv.is_dying:
+			continue
+		feet.append(uv.global_position)
+	grid.update_occlusion_fade(cam, feet)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not in_battle:
+		return
+	if not (event is InputEventKey and event.pressed and not event.echo):
+		return
+	if _is_text_input_focused():
+		return
+	match event.keycode:
+		KEY_SPACE:
+			_set_obstacle_clear(not _obstacle_clear_on)
+			get_viewport().set_input_as_handled()
+		KEY_R:
+			request_undo()
+			get_viewport().set_input_as_handled()
+
+
+func _set_obstacle_clear(on: bool) -> void:
+	if on == _obstacle_clear_on:
+		return
+	_obstacle_clear_on = on
+	if grid != null:
+		grid.set_obstacle_clear(on)
+
+
+func _set_range_overlay(on: bool) -> void:
+	if on == _range_overlay_on:
+		return
+	_range_overlay_on = on
+	if on:
+		_refresh_range_preview()
+	elif grid != null:
+		grid.clear_range_preview()
+
+
+func _refresh_range_preview() -> void:
+	if grid == null or not _range_overlay_on:
+		return
+	if input_locked or not in_battle or _playing_events:
+		grid.clear_range_preview()
+		return
+	var wr := int(_active_weapon_dict().get("range", 0))
+	if wr <= 0:
+		wr = ZZLos.weapon_range()
+	if wr <= 0:
+		grid.clear_range_preview()
+		return
+	var cells: Array = []
+	var cols := ZZGridView.GRID_COLS
+	var rows := ZZGridView.GRID_ROWS
+	for y in rows:
+		for x in cols:
+			var d := ZZLos.hex_distance(local_pos.x, local_pos.y, x, y)
+			if d >= 1 and d <= wr:
+				cells.append(Vector2i(x, y))
+	grid.set_range_preview(cells)
 
 
 func _clear_hover_path() -> void:
@@ -2130,6 +2307,7 @@ func _recompute_local_from_queue() -> void:
 	if grid != null:
 		grid.set_highlight(local_pos if local_pos != _turn_start_pos else Vector2i(-1, -1))
 	_clear_hover_path()
+	_refresh_reach_preview()
 	ap_changed.emit(local_ap)
 	medkits_changed.emit(local_medkits)
 	ammo_changed.emit(local_ammo_in_mag, local_ammo_reserve)
@@ -2158,6 +2336,8 @@ func _flush_move_history(lines: Array, move_run: int, move_end: Vector2i, move_a
 
 
 func _emit_history() -> void:
+	## Keep green reach wash in sync with local AP/pos (2d parity).
+	_refresh_reach_preview()
 	var lines: Array = []
 	var sim_pos := _turn_start_pos
 	var sim_posture := _turn_start_posture

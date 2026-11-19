@@ -1,14 +1,14 @@
 extends RefCounted
 class_name ZZLos
 
-## Offset col/row math matching server (pointy-top odd-r).
+## Offset col/row math matching server (flat-top odd-q, Fallout-style).
 ## All balance numbers come from server `rules` (lobby_state / battle_start / state.rules).
 ## No balance hardcoding — empty until apply_rules().
 
 static var _rules: Dictionary = {}
 static var _item_catalog: Dictionary = {} # { items: [], by_id: {} }
 
-# even row / odd row neighbor deltas — must match server oddrNeighborDirs.
+# even col / odd col neighbor deltas — must match server oddqNeighborDirs.
 const NEIGHBOR_DIRS := [
 	[Vector2i(1, 0), Vector2i(0, -1), Vector2i(-1, -1), Vector2i(-1, 0), Vector2i(-1, 1), Vector2i(0, 1)],
 	[Vector2i(1, 0), Vector2i(1, -1), Vector2i(0, -1), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(1, 1)],
@@ -276,15 +276,15 @@ static func _half(n: int) -> int:
 
 
 static func offset_to_axial(col: int, row: int) -> Vector2i:
-	return Vector2i(col - _half(row - (row & 1)), row)
+	return Vector2i(col, row - _half(col - (col & 1)))
 
 
 static func axial_to_offset(q: int, r: int) -> Vector2i:
-	return Vector2i(q + _half(r - (r & 1)), r)
+	return Vector2i(q, r + _half(q - (q & 1)))
 
 
 static func is_hex_neighbor(acol: int, arow: int, bcol: int, brow: int) -> bool:
-	var dirs: Array = NEIGHBOR_DIRS[arow & 1]
+	var dirs: Array = NEIGHBOR_DIRS[acol & 1]
 	for d in dirs:
 		var delta: Vector2i = d
 		if acol + delta.x == bcol and arow + delta.y == brow:
@@ -294,7 +294,7 @@ static func is_hex_neighbor(acol: int, arow: int, bcol: int, brow: int) -> bool:
 
 static func hex_neighbors(col: int, row: int) -> Array:
 	var out: Array = []
-	for d in NEIGHBOR_DIRS[row & 1]:
+	for d in NEIGHBOR_DIRS[col & 1]:
 		var delta: Vector2i = d
 		out.append(Vector2i(col + delta.x, row + delta.y))
 	return out
@@ -383,7 +383,7 @@ static func evaluate_shot(
 
 	var obs := obstacles_on_shot(walls, x0, y0, x1, y1)
 	for o in obs:
-		if str(o.kind) == "full":
+		if _is_full_cover_kind(str(o.kind)):
 			return {
 				"blocked": true,
 				"chance": 0.0,
@@ -396,7 +396,7 @@ static func evaluate_shot(
 		var kind := str(o.kind)
 		var ox := int(o.x)
 		var oy := int(o.y)
-		if (kind == "half" or kind == "window") and is_hex_neighbor(ox, oy, x0, y0) and not is_hex_neighbor(ox, oy, x1, y1):
+		if _is_soft_cover_kind(kind) and is_hex_neighbor(ox, oy, x0, y0) and not is_hex_neighbor(ox, oy, x1, y1):
 			continue
 		path_obs.append(o)
 	if target_posture == "cover" and not path_obs.is_empty():
@@ -414,7 +414,7 @@ static func evaluate_shot(
 	var has_soft := false
 	for o in path_obs:
 		var kind := str(o.kind)
-		if kind != "half" and kind != "window":
+		if not _is_soft_cover_kind(kind):
 			continue
 		var d := _soft_defense(target_posture, kind)
 		if not has_soft or d > defense:
@@ -461,10 +461,36 @@ static func _open_defense(target_posture: String) -> float:
 	return rule_f("def_stand_open")
 
 
+## Cover tier: full / half / window (object kind → rules). Mirrors server ObstacleKind.Tier.
+static func cover_tier(kind: String) -> String:
+	match kind:
+		"block_wall", "full":
+			return "full"
+		"window":
+			return "window"
+		_:
+			return "half" # block, car, half, unknown
+
+
+static func _is_full_cover_kind(kind: String) -> bool:
+	return cover_tier(kind) == "full"
+
+
+static func _is_half_cover_kind(kind: String) -> bool:
+	return cover_tier(kind) == "half"
+
+
+static func _is_soft_cover_kind(kind: String) -> bool:
+	## half or window — affects chance / miss VFX; does not hard-block.
+	var t := cover_tier(kind)
+	return t == "half" or t == "window"
+
+
 static func _soft_defense(target_posture: String, kind: String) -> float:
+	var window := cover_tier(kind) == "window"
 	if target_posture == "sit":
-		return rule_f("def_sit_window") if kind == "window" else rule_f("def_sit_half")
-	if kind == "window":
+		return rule_f("def_sit_window") if window else rule_f("def_sit_half")
+	if window:
 		return rule_f("def_stand_window")
 	return rule_f("def_stand_half")
 
